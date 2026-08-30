@@ -314,8 +314,9 @@ run_chinadns_ng() {
 }
 
 run_socks() {
-	local flag node bind socks_port config_file http_port http_config_file relay_port log_file no_run
+	local flag node bind socks_port config_file http_port http_config_file relay_port log_file no_run server_host
 	eval_set_val "$@"
+	local server_host_override="$server_host"
 	[ -n "$config_file" ] && [ -z "$(echo ${config_file} | grep $TMP_PATH)" ] && config_file=$TMP_PATH/$config_file
 	[ -n "$http_port" ] || http_port=0
 	[ -n "$http_config_file" ] && [ -z "$(echo ${http_config_file} | grep $TMP_PATH)" ] && http_config_file=$TMP_PATH/$http_config_file
@@ -327,7 +328,7 @@ run_socks() {
 
 	local type=$(echo $(config_n_get $node type) | tr 'A-Z' 'a-z')
 	local remarks=$(config_n_get $node remarks)
-	local server_host=$(config_n_get $node address)
+	[ -n "$server_host" ] || server_host=$(config_n_get $node address)
 	local server_port=$(config_n_get $node port)
 
 	if [ "$(config_get_type $node)" = "socks" ]; then
@@ -409,21 +410,25 @@ run_socks() {
 		unset bin util
 	;;
 	sing-box)
+		local _args=""
 		[ "$http_port" != "0" ] && {
 			http_flag=1
 			config_file="${config_file%%.*}+http${config_file#${config_file%%.*}}"
-			local _args="http_address=$bind http_port=$http_port"
+			_args="http_address=$bind http_port=$http_port"
 		}
+		[ -n "$server_host_override" ] && _args="${_args} server_host=$server_host server_port=$server_port"
 		[ -n "$relay_port" ] && _args="${_args} server_host=$server_host server_port=$server_port"
 		[ -n "$no_run" ] && _args="${_args} no_run=1"
 		run_singbox flag=$flag node=$node socks_address=$bind socks_port=$socks_port config_file=$config_file log_file=$log_file ${_args}
 	;;
 	xray)
+		local _args=""
 		[ "$http_port" != "0" ] && {
 			http_flag=1
 			config_file="${config_file%%.*}+http${config_file#${config_file%%.*}}"
-			local _args="http_address=$bind http_port=$http_port"
+			_args="http_address=$bind http_port=$http_port"
 		}
+		[ -n "$server_host_override" ] && _args="${_args} server_host=$server_host server_port=$server_port"
 		[ -n "$relay_port" ] && _args="${_args} server_host=$server_host server_port=$server_port"
 		[ -n "$no_run" ] && _args="${_args} no_run=1"
 		run_xray flag=$flag node=$node socks_address=$bind socks_port=$socks_port config_file=$config_file log_file=$log_file ${_args}
@@ -812,6 +817,57 @@ start_global() {
 	set_cache_var "node_${NODE}_redir_port" "$REDIR_PORT"
 	set_cache_var "ACL_GLOBAL_node" "$NODE"
 	set_cache_var "ACL_GLOBAL_redir_port" "$REDIR_PORT"
+}
+
+start_global_openvpn() {
+	[ "$GLOBAL_OPENVPN" = "1" ] || return 0
+	local node="$NODE" openvpn_dir="${TMP_PATH}/openvpn/nodes/${NODE}"
+	local preproxy_node preproxy_port preproxy_type preproxy_host openvpn_bin
+	local allow_lan=$(config_n_get @global[0] openvpn_global_allow_lan 1)
+	local enable_log=$(config_n_get @global[0] log_node 0)
+	preproxy_node=$(config_n_get "$node" preproxy_node)
+	if [ -n "$preproxy_node" ]; then
+		preproxy_type=$(config_n_get "$preproxy_node" type)
+		case "$preproxy_type:$(config_n_get "$preproxy_node" protocol)" in
+			Xray:_*|sing-box:_*)
+				echolog "  - 全局 OpenVPN 节点[$node]的前置节点不是普通 Xray/Sing-box 节点，已忽略前置代理。"
+				preproxy_node=""
+				;;
+			Xray:*|sing-box:*) ;;
+			*)
+				echolog "  - 全局 OpenVPN 节点[$node]的前置节点无效，已忽略前置代理。"
+				preproxy_node=""
+				;;
+		esac
+	fi
+	if [ -n "$preproxy_node" ]; then
+		preproxy_port=$(get_new_port 11940)
+		preproxy_host=$($APP_PATH/openvpn.sh resolve-ipv4 "$(config_n_get "$preproxy_node" address)")
+		[ -n "$preproxy_host" ] || echolog "  - 全局 OpenVPN 节点[$node]无法解析前置节点地址，连接保持阻断。"
+	fi
+
+	mkdir -p "$GLOBAL_ACL_PATH"
+	if $APP_PATH/openvpn.sh global "$node" "$CLIENT_PROXY" "$LOCALHOST_PROXY" "$allow_lan" "$preproxy_port"; then
+		if [ -n "$preproxy_node" ]; then
+			local preproxy_log="/dev/null"
+			[ "$enable_log" = "1" ] && preproxy_log="${GLOBAL_ACL_PATH}/openvpn_preproxy.log"
+			run_socks flag="openvpn_${node}" node="$preproxy_node" bind=127.0.0.1 socks_port="$preproxy_port" config_file="openvpn/${node}_preproxy.json" log_file="$preproxy_log" server_host="$preproxy_host"
+			touch "$openvpn_dir/preproxy_started"
+		fi
+
+		openvpn_bin=$(first_type openvpn)
+		if [ -z "$openvpn_bin" ]; then
+			echolog "  - 找不到 OpenVPN 客户端，全局节点[$node]未启动；防回落阻断继续生效。"
+		elif ! $APP_PATH/openvpn.sh running "$node" && ! busybox pgrep -f "$openvpn_dir/client.conf" >/dev/null 2>&1; then
+			local openvpn_log="/dev/null"
+			[ "$enable_log" = "1" ] && openvpn_log="${GLOBAL_ACL_PATH}/openvpn.log"
+			rm -f "$openvpn_dir/openvpn.pid"
+			ln_run "$openvpn_bin" "openvpn_${node}" "$openvpn_log" --config "$openvpn_dir/client.conf"
+			echolog "  - 全局 OpenVPN 节点[$node]已启动，LAN 与路由器本机策略按全局开关接管。"
+		fi
+	else
+		echolog "  - 全局 OpenVPN 节点[$node]配置生成失败；所选流量保持阻断，不会回落 WAN。"
+	fi
 }
 
 start_socks() {
@@ -1400,7 +1456,7 @@ acl_app() {
 				set_cache_var "ACL_${sid}_node" "$node"
 				set_cache_var "ACL_${sid}_openvpn" "1"
 				local openvpn_dir="${TMP_PATH}/openvpn/nodes/${node}"
-				local node_slot preproxy_node preproxy_port preproxy_type openvpn_bin binding_ip_valid=0
+				local node_slot preproxy_node preproxy_port preproxy_type preproxy_host openvpn_bin binding_ip_valid=0
 				echo "$bind_ip" | awk -F. 'NF == 4 { for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]+$/ || $i > 255) exit 1; exit 0 } { exit 1 }' && binding_ip_valid=1
 				if [ -d "$openvpn_dir" ]; then
 					node_slot=$(cat "$openvpn_dir/table" 2>/dev/null)
@@ -1434,13 +1490,14 @@ acl_app() {
 					if [ -n "$preproxy_node" ]; then
 						preproxy_port=$(cat "$openvpn_dir/preproxy_port" 2>/dev/null)
 						[ -n "$preproxy_port" ] || preproxy_port=$(get_new_port 11940)
+						preproxy_host=$($APP_PATH/openvpn.sh resolve-ipv4 "$(config_n_get "$preproxy_node" address)")
 					fi
 
 					if $APP_PATH/openvpn.sh register "$node" "$sid" "$bind_ip" "$node_slot" "${openvpn_allow_lan:-1}" "$preproxy_port"; then
 						if [ -n "$preproxy_node" ] && [ ! -f "$openvpn_dir/preproxy_started" ]; then
 							local preproxy_log="/dev/null"
 							[ "$log" = "1" ] && preproxy_log="${acl_path}/openvpn_preproxy.log"
-							run_socks flag="openvpn_${node}" node="$preproxy_node" bind=127.0.0.1 socks_port="$preproxy_port" config_file="openvpn/${node}_preproxy.json" log_file="$preproxy_log"
+							run_socks flag="openvpn_${node}" node="$preproxy_node" bind=127.0.0.1 socks_port="$preproxy_port" config_file="openvpn/${node}_preproxy.json" log_file="$preproxy_log" server_host="$preproxy_host"
 							touch "$openvpn_dir/preproxy_started"
 						fi
 
@@ -1460,7 +1517,14 @@ acl_app() {
 				fi
 
 				unset enabled sid remarks sources interface bind_enable bind_mac bind_ip bind_hostname openvpn_allow_lan
-				unset source_list node use_global_config log loglevel node_slot preproxy_node preproxy_port preproxy_type openvpn_bin openvpn_dir binding_ip_valid
+				unset source_list node use_global_config log loglevel node_slot preproxy_node preproxy_port preproxy_type preproxy_host openvpn_bin openvpn_dir binding_ip_valid
+				continue
+			fi
+
+			if [ "$GLOBAL_OPENVPN" = "1" ] && [ "${mode:-0}" = "1" ] && [ "${use_global_config:-0}" = "1" ]; then
+				set_cache_var "ACL_${sid}_openvpn_global" "1"
+				unset enabled sid remarks sources interface bind_enable bind_mac bind_ip bind_hostname openvpn_allow_lan
+				unset source_list node use_global_config log loglevel
 				continue
 			fi
 
@@ -1717,6 +1781,7 @@ start() {
 	nftflag=0
 	USE_TABLES=""
 	check_run_environment
+	[ "$GLOBAL_OPENVPN" = "1" ] && start_global_openvpn
 	if [ "$ENABLED_DEFAULT_ACL" = 1 ] || [ "$ENABLED_ACLS" = 1 ]; then
 		[ "$(uci -q get dhcp.@dnsmasq[0].dns_redirect)" = "1" ] && {
 			uci -q set ${CONFIG}.@global[0].dnsmasq_dns_redirect='1'
@@ -1733,7 +1798,7 @@ start() {
 	}
 	[ -n "$USE_TABLES" ] && source $APP_PATH/${USE_TABLES}.sh start
 	set_cache_var "USE_TABLES" "$USE_TABLES"
-	if [ "$ENABLED_DEFAULT_ACL" = 1 ] || [ "$ENABLED_ACLS" = 1 ]; then
+	if [ "$ENABLED_DEFAULT_ACL" = 1 ] || [ "$ENABLED_ACLS" = 1 ] || [ "$GLOBAL_OPENVPN" = "1" ]; then
 		bridge_nf_ipt=$(sysctl -e -n net.bridge.bridge-nf-call-iptables)
 		set_cache_var "bak_bridge_nf_ipt" "$bridge_nf_ipt"
 		sysctl -w net.bridge.bridge-nf-call-iptables=0 >/dev/null 2>&1
@@ -1813,6 +1878,7 @@ stop() {
 
 get_config() {
 	ENABLED_DEFAULT_ACL=0
+	GLOBAL_OPENVPN=0
 	REDIR_PORT=$(echo $(get_new_port 1041 tcp,udp))
 	ENABLED=$(config_n_get @global[0] enabled 0)
 	SOCKS_ENABLED=$(config_n_get @global[0] socks_enabled 0)
@@ -1820,12 +1886,17 @@ get_config() {
 
 	[ "$ENABLED" = 1 ] && {
 		if [ -n "$NODE" ] && ([ "$(config_get_type $NODE)" = "nodes" ] || [ "$(config_get_type $NODE)" = "socks" ]); then
-			ENABLED_DEFAULT_ACL=1
+			if [ "$(config_n_get "$NODE" type)" = "OpenVPN" ]; then
+				GLOBAL_OPENVPN=1
+			else
+				ENABLED_DEFAULT_ACL=1
+			fi
 		fi
 	}
 	ENABLED_ACLS=$(config_n_get @global[0] acl_enable 0)
 	set_cache_var ENABLED_DEFAULT_ACL $ENABLED_DEFAULT_ACL
 	set_cache_var ENABLED_ACLS $ENABLED_ACLS
+	set_cache_var GLOBAL_OPENVPN $GLOBAL_OPENVPN
 
 	TCP_PROXY_WAY=$(config_n_get @global_forwarding[0] tcp_proxy_way redirect)
 	PROXY_IPV6=$(config_n_get @global_forwarding[0] ipv6_tproxy 0)

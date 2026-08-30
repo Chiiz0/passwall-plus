@@ -324,12 +324,23 @@ clear_openvpn_fw4() {
 	done
 }
 
+valid_openvpn_ipv4_source() {
+	local value="$1" address prefix
+	case "$value" in
+		*/*) address=${value%/*}; prefix=${value##*/} ;;
+		*) address=$value; prefix=32 ;;
+	esac
+	echo "$address" | awk -F. 'NF == 4 { for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]+$/ || $i > 255) exit 1; exit 0 } { exit 1 }' || return 1
+	case "$prefix" in ""|*[!0-9]*) return 1 ;; esac
+	[ "$prefix" -ge 0 ] && [ "$prefix" -le 32 ]
+}
+
 restore_openvpn_fw4() {
 	[ -z "$(command -v config_n_get)" ] && . "$UTILS_PATH"
 	clear_openvpn_fw4
 	nft list chain inet fw4 forward >/dev/null 2>&1 || return 0
 	local base="${TMP_PATH}/openvpn/nodes"
-	local dir dev ip allow_lan sid lan_device
+	local dir dev ip allow_lan sid lan_device client localhost source
 	[ -d "$base" ] || return 0
 	for dir in "$base"/*; do
 		[ -d "$dir" ] || continue
@@ -345,6 +356,19 @@ restore_openvpn_fw4() {
 			fi
 			nft "insert rule inet fw4 forward ip saddr $ip oifname \"$dev\" counter accept comment \"PSW_OPENVPN_${sid}\""
 		done < "$dir/sources"
+		if [ -f "$dir/global" ]; then
+			IFS='|' read -r client localhost allow_lan < "$dir/global"
+			while IFS='|' read -r source sid; do
+				valid_openvpn_ipv4_source "$source" || continue
+				nft "insert rule inet fw4 forward ip daddr $source iifname \"$dev\" ct state established,related counter accept comment \"PSW_OPENVPN_GLOBAL_${sid}\""
+				if [ "$allow_lan" = "1" ]; then
+					for lan_device in $(get_firewall_zone_devices $(config_n_get @global[0] ipv6_reject_zones lan)); do
+						nft "insert rule inet fw4 forward ip saddr $source oifname \"$lan_device\" counter accept comment \"PSW_OPENVPN_GLOBAL_LAN_${sid}\""
+					done
+				fi
+				nft "insert rule inet fw4 forward ip saddr $source oifname \"$dev\" counter accept comment \"PSW_OPENVPN_GLOBAL_${sid}\""
+			done < "$dir/global_sources"
+		fi
 	done
 }
 
@@ -354,13 +378,21 @@ load_openvpn() {
 	nft "add chain $NFTABLE_NAME srcnat { type nat hook postrouting priority srcnat - 1; policy accept; }" 2>/dev/null
 	nft "add chain $NFTABLE_NAME input { type filter hook input priority filter - 1; policy accept; }" 2>/dev/null
 	nft "add chain $NFTABLE_NAME forward { type filter hook forward priority filter - 1; policy accept; }" 2>/dev/null
+	nft "add chain $NFTABLE_NAME output { type filter hook output priority filter - 1; policy accept; }" 2>/dev/null
 	nft "add chain $NFTABLE_NAME PSW_OPENVPN_NAT" 2>/dev/null
 	nft "flush chain $NFTABLE_NAME PSW_OPENVPN_NAT"
 	nft "add chain $NFTABLE_NAME PSW_OPENVPN_INPUT" 2>/dev/null
 	nft "flush chain $NFTABLE_NAME PSW_OPENVPN_INPUT"
 	nft "add chain $NFTABLE_NAME PSW_OPENVPN_FWD" 2>/dev/null
 	nft "flush chain $NFTABLE_NAME PSW_OPENVPN_FWD"
-	local has_rules=0 has_input_rules=0 dir dev dns ip allow_lan sid lan_device
+	nft "add chain $NFTABLE_NAME PSW_OPENVPN_DNS" 2>/dev/null
+	nft "flush chain $NFTABLE_NAME PSW_OPENVPN_DNS"
+	nft "add chain $NFTABLE_NAME PSW_OPENVPN_OUTPUT" 2>/dev/null
+	nft "flush chain $NFTABLE_NAME PSW_OPENVPN_OUTPUT"
+	nft "add chain $NFTABLE_NAME PSW_OPENVPN_DNS_OUT" 2>/dev/null
+	nft "flush chain $NFTABLE_NAME PSW_OPENVPN_DNS_OUT"
+	local has_rules=0 has_input_rules=0 has_dns_rules=0 has_dns_output_rules=0 has_output_rules=0 dir dev dns ip allow_lan sid lan_device
+	local client localhost source
 	for dir in "$base"/*; do
 		[ -d "$dir" ] || continue
 		dev=$(cat "$dir/dev" 2>/dev/null)
@@ -389,28 +421,81 @@ load_openvpn() {
 			nft "add rule $NFTABLE_NAME PSW_OPENVPN_FWD ip saddr $ip counter reject comment \"PSW_OPENVPN_KILLSWITCH_${sid}\""
 			has_rules=1
 		done < "$dir/sources"
+
+		[ -f "$dir/global" ] || continue
+		IFS='|' read -r client localhost allow_lan < "$dir/global"
+		while IFS='|' read -r source sid; do
+			valid_openvpn_ipv4_source "$source" || continue
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_DNS ip saddr $source counter return comment \"PSW_OPENVPN_BYPASS_${sid}\""
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_INPUT ip saddr $source counter return comment \"PSW_OPENVPN_BYPASS_${sid}\""
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_FWD ip saddr $source counter return comment \"PSW_OPENVPN_BYPASS_${sid}\""
+		done < "$dir/bypass_sources"
+
+		while IFS='|' read -r source sid; do
+			valid_openvpn_ipv4_source "$source" || continue
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_DNS ip saddr $source meta l4proto udp udp dport 53 counter dnat ip to $dns comment \"PSW_OPENVPN_GLOBAL_DNS_${sid}\""
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_DNS ip saddr $source meta l4proto tcp tcp dport 53 counter dnat ip to $dns comment \"PSW_OPENVPN_GLOBAL_DNS_${sid}\""
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_NAT ip saddr $source oifname \"$dev\" counter masquerade comment \"PSW_OPENVPN_GLOBAL_${sid}\""
+			if [ "$allow_lan" != "1" ]; then
+				nft "add rule $NFTABLE_NAME PSW_OPENVPN_INPUT ip saddr $source udp sport 68 udp dport 67 counter return comment \"PSW_OPENVPN_GLOBAL_DHCP_${sid}\""
+				nft "add rule $NFTABLE_NAME PSW_OPENVPN_INPUT ip saddr $source counter reject comment \"PSW_OPENVPN_GLOBAL_INPUT_KILLSWITCH_${sid}\""
+				has_input_rules=1
+			fi
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_FWD ip daddr $source iifname \"$dev\" ct state established,related counter accept comment \"PSW_OPENVPN_GLOBAL_${sid}\""
+			if [ "$allow_lan" = "1" ]; then
+				for lan_device in $(get_firewall_zone_devices $IPV6_REJECT_ZONES); do
+					nft "add rule $NFTABLE_NAME PSW_OPENVPN_FWD ip saddr $source oifname \"$lan_device\" counter accept comment \"PSW_OPENVPN_GLOBAL_LAN_${sid}\""
+				done
+			fi
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_FWD ip saddr $source oifname \"$dev\" counter accept comment \"PSW_OPENVPN_GLOBAL_${sid}\""
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_FWD ip saddr $source counter reject comment \"PSW_OPENVPN_GLOBAL_KILLSWITCH_${sid}\""
+			has_rules=1
+			has_dns_rules=1
+		done < "$dir/global_sources"
+		if [ "$localhost" = "1" ]; then
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_INPUT iifname \"$dev\" ct state established,related counter accept comment \"PSW_OPENVPN_GLOBAL_LOCALHOST\""
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_DNS_OUT ip daddr 127.0.0.0/8 counter return comment \"PSW_OPENVPN_GLOBAL_DNS_LOOPBACK\""
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_DNS_OUT meta mark 0 meta l4proto udp udp dport 53 counter dnat ip to $dns comment \"PSW_OPENVPN_GLOBAL_DNS_LOCALHOST\""
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_DNS_OUT meta mark 0 meta l4proto tcp tcp dport 53 counter dnat ip to $dns comment \"PSW_OPENVPN_GLOBAL_DNS_LOCALHOST\""
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_OUTPUT oifname \"lo\" counter return comment \"PSW_OPENVPN_GLOBAL_LOCALHOST\""
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_OUTPUT meta mark 255 counter return comment \"PSW_OPENVPN_GLOBAL_BYPASS\""
+			for lan_device in $(get_firewall_zone_devices $IPV6_REJECT_ZONES); do
+				nft "add rule $NFTABLE_NAME PSW_OPENVPN_OUTPUT oifname \"$lan_device\" counter return comment \"PSW_OPENVPN_GLOBAL_LAN\""
+			done
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_OUTPUT oifname \"$dev\" counter accept comment \"PSW_OPENVPN_GLOBAL_LOCALHOST\""
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_OUTPUT counter reject comment \"PSW_OPENVPN_GLOBAL_OUTPUT_KILLSWITCH\""
+			has_input_rules=1
+			has_dns_output_rules=1
+			has_output_rules=1
+			has_rules=1
+		fi
 	done
 	if [ "$has_rules" = "1" ]; then
 		nft "insert rule $NFTABLE_NAME srcnat counter jump PSW_OPENVPN_NAT comment \"PSW_OPENVPN\""
 		[ "$has_input_rules" = "1" ] && nft "insert rule $NFTABLE_NAME input counter jump PSW_OPENVPN_INPUT comment \"PSW_OPENVPN\""
+		[ "$has_output_rules" = "1" ] && nft "insert rule $NFTABLE_NAME output counter jump PSW_OPENVPN_OUTPUT comment \"PSW_OPENVPN\""
 		nft "insert rule $NFTABLE_NAME forward counter jump PSW_OPENVPN_FWD comment \"PSW_OPENVPN\""
+		[ "$has_dns_rules" = "1" ] && nft "insert rule $NFTABLE_NAME dstnat counter jump PSW_OPENVPN_DNS comment \"PSW_OPENVPN_DNS\""
+		[ "$has_dns_output_rules" = "1" ] && nft "insert rule $NFTABLE_NAME nat_output counter jump PSW_OPENVPN_DNS_OUT comment \"PSW_OPENVPN_DNS_OUT\""
 		restore_openvpn_fw4
-		echolog "  - 已加载 OpenVPN 设备全流量、DNS、NAT 与防回落规则。"
+		echolog "  - 已加载 OpenVPN 全局/设备全流量、DNS、NAT 与防回落规则。"
 	else
 		nft "delete chain $NFTABLE_NAME PSW_OPENVPN_NAT" 2>/dev/null
 		nft "delete chain $NFTABLE_NAME PSW_OPENVPN_INPUT" 2>/dev/null
 		nft "delete chain $NFTABLE_NAME PSW_OPENVPN_FWD" 2>/dev/null
 	fi
+	[ "$has_dns_rules" = "1" ] || nft "delete chain $NFTABLE_NAME PSW_OPENVPN_DNS" 2>/dev/null
+	[ "$has_dns_output_rules" = "1" ] || nft "delete chain $NFTABLE_NAME PSW_OPENVPN_DNS_OUT" 2>/dev/null
+	[ "$has_output_rules" = "1" ] || nft "delete chain $NFTABLE_NAME PSW_OPENVPN_OUTPUT" 2>/dev/null
 }
 
 load_acl() {
 	{ [ "$ENABLED_ACLS" = "1" ] || { [ "$ENABLED_DEFAULT_ACL" = "1" ] && [ "$CLIENT_PROXY" = "1" ]; }; } && echolog "  - 访问控制："
 	[ "$ENABLED_ACLS" = 1 ] && {
 		acl_app
-		load_openvpn
 		for sid in $(ls -F ${TMP_ACL_PATH} | grep '/$' | awk -F '/' '{print $1}' | grep -v 'default'); do
 			eval "$(uci -q show "${CONFIG}.${sid}" | cut -d'.' -sf 3-)"
-			if [ "$(get_cache_var "ACL_${sid}_openvpn")" = "1" ]; then
+			if [ "$(get_cache_var "ACL_${sid}_openvpn")" = "1" ] || [ "$(get_cache_var "ACL_${sid}_openvpn_global")" = "1" ]; then
 				unset enabled sid remarks sources interface node source_list mode use_global_config tcp_no_redir_ports udp_no_redir_ports tcp_proxy_drop_ports udp_proxy_drop_ports tcp_redir_ports udp_redir_ports
 				continue
 			fi
@@ -770,6 +855,7 @@ load_acl() {
 			unset tcp_port udp_port node_remark _acl_list use_shunt_node dns_redirect use_fakedns
 		done
 	}
+	load_openvpn
 
 	[ "$ENABLED_DEFAULT_ACL" = 1 ] && [ "$CLIENT_PROXY" = 1 ] && {
 		msg="【默认】，"
@@ -1635,7 +1721,7 @@ add_firewall_rule() {
 
 del_firewall_rule() {
 	clear_openvpn_fw4
-	for nft in "dstnat" "srcnat" "input" "forward" "nat_output" "mangle_prerouting" "mangle_output"; do
+	for nft in "dstnat" "srcnat" "input" "forward" "output" "nat_output" "mangle_prerouting" "mangle_output"; do
         local handles=$(nft -a list chain $NFTABLE_NAME ${nft} 2>/dev/null | grep -E "PSW_" | awk -F '# handle ' '{print$2}')
 		for handle in $handles; do
 			nft delete rule $NFTABLE_NAME ${nft} handle ${handle} 2>/dev/null
@@ -1729,7 +1815,7 @@ gen_include() {
 }
 
 start() {
-	[ "$ENABLED_DEFAULT_ACL" = 0 ] && [ "$ENABLED_ACLS" = 0 ] && [ "$REJECT_IPV6" != 1 ] && return
+	[ "$ENABLED_DEFAULT_ACL" = 0 ] && [ "$ENABLED_ACLS" = 0 ] && [ "$GLOBAL_OPENVPN" != 1 ] && [ "$REJECT_IPV6" != 1 ] && return
 	add_firewall_rule
 	gen_include
 }

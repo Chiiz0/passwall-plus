@@ -262,16 +262,34 @@ load_device_guard() {
 	fi
 }
 
+valid_openvpn_ipv4_source() {
+	local value="$1" address prefix
+	case "$value" in
+		*/*) address=${value%/*}; prefix=${value##*/} ;;
+		*) address=$value; prefix=32 ;;
+	esac
+	echo "$address" | awk -F. 'NF == 4 { for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]+$/ || $i > 255) exit 1; exit 0 } { exit 1 }' || return 1
+	case "$prefix" in ""|*[!0-9]*) return 1 ;; esac
+	[ "$prefix" -ge 0 ] && [ "$prefix" -le 32 ]
+}
+
 load_openvpn() {
 	local base="${TMP_PATH}/openvpn/nodes"
 	[ -d "$base" ] || return 0
 	$ipt_n -N PSW_OPENVPN 2>/dev/null
 	$ipt_n -F PSW_OPENVPN
+	$ipt_n -N PSW_OPENVPN_DNS 2>/dev/null
+	$ipt_n -F PSW_OPENVPN_DNS
+	$ipt_n -N PSW_OPENVPN_DNS_OUT 2>/dev/null
+	$ipt_n -F PSW_OPENVPN_DNS_OUT
 	$ipt_f -N PSW_OPENVPN_INPUT 2>/dev/null
 	$ipt_f -F PSW_OPENVPN_INPUT
 	$ipt_f -N PSW_OPENVPN 2>/dev/null
 	$ipt_f -F PSW_OPENVPN
-	local has_rules=0 has_input_rules=0 dir dev dns ip allow_lan sid lan_device
+	$ipt_f -N PSW_OPENVPN_OUTPUT 2>/dev/null
+	$ipt_f -F PSW_OPENVPN_OUTPUT
+	local has_rules=0 has_input_rules=0 has_dns_rules=0 has_dns_output_rules=0 has_output_rules=0 dir dev dns ip allow_lan sid lan_device
+	local client localhost source
 	for dir in "$base"/*; do
 		[ -d "$dir" ] || continue
 		dev=$(cat "$dir/dev" 2>/dev/null)
@@ -300,27 +318,82 @@ load_openvpn() {
 			$ipt_f -A PSW_OPENVPN $(comment "PSW_OPENVPN_KILLSWITCH_${sid}") -s "$ip" -j REJECT --reject-with icmp-admin-prohibited
 			has_rules=1
 		done < "$dir/sources"
+
+		[ -f "$dir/global" ] || continue
+		IFS='|' read -r client localhost allow_lan < "$dir/global"
+		while IFS='|' read -r source sid; do
+			valid_openvpn_ipv4_source "$source" || continue
+			$ipt_n -A PSW_OPENVPN_DNS $(comment "PSW_OPENVPN_BYPASS_${sid}") -s "$source" -j RETURN
+			$ipt_f -A PSW_OPENVPN_INPUT $(comment "PSW_OPENVPN_BYPASS_${sid}") -s "$source" -j RETURN
+			$ipt_f -A PSW_OPENVPN $(comment "PSW_OPENVPN_BYPASS_${sid}") -s "$source" -j RETURN
+		done < "$dir/bypass_sources"
+
+		while IFS='|' read -r source sid; do
+			valid_openvpn_ipv4_source "$source" || continue
+			$ipt_n -A PSW_OPENVPN_DNS $(comment "PSW_OPENVPN_GLOBAL_DNS_${sid}") -s "$source" -p udp --dport 53 -j DNAT --to-destination "$dns"
+			$ipt_n -A PSW_OPENVPN_DNS $(comment "PSW_OPENVPN_GLOBAL_DNS_${sid}") -s "$source" -p tcp --dport 53 -j DNAT --to-destination "$dns"
+			$ipt_n -A PSW_OPENVPN $(comment "PSW_OPENVPN_GLOBAL_${sid}") -s "$source" -o "$dev" -j MASQUERADE
+			if [ "$allow_lan" != "1" ]; then
+				$ipt_f -A PSW_OPENVPN_INPUT $(comment "PSW_OPENVPN_GLOBAL_DHCP_${sid}") -s "$source" -p udp --sport 68 --dport 67 -j RETURN
+				$ipt_f -A PSW_OPENVPN_INPUT $(comment "PSW_OPENVPN_GLOBAL_INPUT_KILLSWITCH_${sid}") -s "$source" -j REJECT --reject-with icmp-admin-prohibited
+				has_input_rules=1
+			fi
+			$ipt_f -A PSW_OPENVPN $(comment "PSW_OPENVPN_GLOBAL_${sid}") -d "$source" -i "$dev" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+			if [ "$allow_lan" = "1" ]; then
+				for lan_device in $(get_firewall_zone_devices $IPV6_REJECT_ZONES); do
+					$ipt_f -A PSW_OPENVPN $(comment "PSW_OPENVPN_GLOBAL_LAN_${sid}") -s "$source" -o "$lan_device" -j ACCEPT
+				done
+			fi
+			$ipt_f -A PSW_OPENVPN $(comment "PSW_OPENVPN_GLOBAL_${sid}") -s "$source" -o "$dev" -j ACCEPT
+			$ipt_f -A PSW_OPENVPN $(comment "PSW_OPENVPN_GLOBAL_KILLSWITCH_${sid}") -s "$source" -j REJECT --reject-with icmp-admin-prohibited
+			has_rules=1
+			has_dns_rules=1
+		done < "$dir/global_sources"
+		if [ "$localhost" = "1" ]; then
+			$ipt_f -A PSW_OPENVPN_INPUT $(comment "PSW_OPENVPN_GLOBAL_LOCALHOST") -i "$dev" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+			$ipt_n -A PSW_OPENVPN_DNS_OUT $(comment "PSW_OPENVPN_GLOBAL_DNS_LOOPBACK") -d 127.0.0.0/8 -j RETURN
+			$ipt_n -A PSW_OPENVPN_DNS_OUT $(comment "PSW_OPENVPN_GLOBAL_DNS_LOCALHOST") -m mark --mark 0/0xffffffff -p udp --dport 53 -j DNAT --to-destination "$dns"
+			$ipt_n -A PSW_OPENVPN_DNS_OUT $(comment "PSW_OPENVPN_GLOBAL_DNS_LOCALHOST") -m mark --mark 0/0xffffffff -p tcp --dport 53 -j DNAT --to-destination "$dns"
+			$ipt_f -A PSW_OPENVPN_OUTPUT $(comment "PSW_OPENVPN_GLOBAL_LOCALHOST") -o lo -j RETURN
+			$ipt_f -A PSW_OPENVPN_OUTPUT $(comment "PSW_OPENVPN_GLOBAL_BYPASS") -m mark --mark 255/0xffffffff -j RETURN
+			for lan_device in $(get_firewall_zone_devices $IPV6_REJECT_ZONES); do
+				$ipt_f -A PSW_OPENVPN_OUTPUT $(comment "PSW_OPENVPN_GLOBAL_LAN") -o "$lan_device" -j RETURN
+			done
+			$ipt_f -A PSW_OPENVPN_OUTPUT $(comment "PSW_OPENVPN_GLOBAL_LOCALHOST") -o "$dev" -j ACCEPT
+			$ipt_f -A PSW_OPENVPN_OUTPUT $(comment "PSW_OPENVPN_GLOBAL_OUTPUT_KILLSWITCH") -j REJECT --reject-with icmp-admin-prohibited
+			has_input_rules=1
+			has_dns_output_rules=1
+			has_output_rules=1
+			has_rules=1
+		fi
 	done
 	if [ "$has_rules" = "1" ]; then
 		$ipt_n -I POSTROUTING 1 $(comment "PSW_OPENVPN") -j PSW_OPENVPN
+		[ "$has_dns_rules" = "1" ] && $ipt_n -I PREROUTING 1 $(comment "PSW_OPENVPN_DNS") -j PSW_OPENVPN_DNS
+		[ "$has_dns_output_rules" = "1" ] && $ipt_n -I OUTPUT 1 $(comment "PSW_OPENVPN_DNS_OUT") -j PSW_OPENVPN_DNS_OUT
 		[ "$has_input_rules" = "1" ] && $ipt_f -I INPUT 1 $(comment "PSW_OPENVPN") -j PSW_OPENVPN_INPUT
+		[ "$has_output_rules" = "1" ] && $ipt_f -I OUTPUT 1 $(comment "PSW_OPENVPN") -j PSW_OPENVPN_OUTPUT
 		$ipt_f -I FORWARD 1 $(comment "PSW_OPENVPN") -j PSW_OPENVPN
-		echolog "  - 已加载 OpenVPN 设备全流量、DNS、NAT 与防回落规则。"
+		echolog "  - 已加载 OpenVPN 全局/设备全流量、DNS、NAT 与防回落规则。"
 	else
 		$ipt_n -X PSW_OPENVPN 2>/dev/null
+		$ipt_n -X PSW_OPENVPN_DNS 2>/dev/null
+		$ipt_n -X PSW_OPENVPN_DNS_OUT 2>/dev/null
 		$ipt_f -X PSW_OPENVPN_INPUT 2>/dev/null
 		$ipt_f -X PSW_OPENVPN 2>/dev/null
 	fi
+	[ "$has_dns_rules" = "1" ] || $ipt_n -X PSW_OPENVPN_DNS 2>/dev/null
+	[ "$has_dns_output_rules" = "1" ] || $ipt_n -X PSW_OPENVPN_DNS_OUT 2>/dev/null
+	[ "$has_output_rules" = "1" ] || $ipt_f -X PSW_OPENVPN_OUTPUT 2>/dev/null
 }
 
 load_acl() {
 	{ [ "$ENABLED_ACLS" = "1" ] || { [ "$ENABLED_DEFAULT_ACL" = "1" ] && [ "$CLIENT_PROXY" = "1" ]; }; } && echolog "  - 访问控制："
 	[ "$ENABLED_ACLS" = 1 ] && {
 		acl_app
-		load_openvpn
 		for sid in $(ls -F ${TMP_ACL_PATH} | grep '/$' | awk -F '/' '{print $1}' | grep -v 'default'); do
 			eval "$(uci -q show "${CONFIG}.${sid}" | cut -d'.' -sf 3-)"
-			if [ "$(get_cache_var "ACL_${sid}_openvpn")" = "1" ]; then
+			if [ "$(get_cache_var "ACL_${sid}_openvpn")" = "1" ] || [ "$(get_cache_var "ACL_${sid}_openvpn_global")" = "1" ]; then
 				unset enabled sid remarks sources interface node source_list mode use_global_config tcp_no_redir_ports udp_no_redir_ports tcp_proxy_drop_ports udp_proxy_drop_ports tcp_redir_ports udp_redir_ports
 				continue
 			fi
@@ -677,6 +750,7 @@ load_acl() {
 			unset tcp_port udp_port node_remark _acl_list use_shunt_node dns_redirect use_fakedns
 		done
 	}
+	load_openvpn
 	
 	[ "$ENABLED_DEFAULT_ACL" = 1 ] && [ "$CLIENT_PROXY" = 1 ] && {
 		msg="【默认】，"
@@ -1528,7 +1602,7 @@ del_firewall_rule() {
 				$ipt -D $chain $index 2>/dev/null
 			done
 		done
-		for chain in "PSW" "PSW_OUTPUT" "PSW_DIVERT" "PSW_DNS" "PSW_RULE" "PSW_DEVICE_GUARD"; do
+		for chain in "PSW" "PSW_OUTPUT" "PSW_DIVERT" "PSW_DNS" "PSW_RULE" "PSW_DEVICE_GUARD" "PSW_OPENVPN_DNS" "PSW_OPENVPN_DNS_OUT" "PSW_OPENVPN_OUTPUT"; do
 			$ipt -F $chain 2>/dev/null
 			$ipt -X $chain 2>/dev/null
 		done
@@ -1537,7 +1611,7 @@ del_firewall_rule() {
 		index=$($ipt_n --line-number -nL POSTROUTING | grep PSW_OPENVPN | head -1 | awk '{print $1}')
 		$ipt_n -D POSTROUTING "$index" 2>/dev/null
 	done
-	for chain in INPUT FORWARD; do
+	for chain in INPUT FORWARD OUTPUT; do
 		for i in $(seq 1 $($ipt_f -nL "$chain" | grep -c PSW_OPENVPN)); do
 			index=$($ipt_f --line-number -nL "$chain" | grep PSW_OPENVPN | head -1 | awk '{print $1}')
 			$ipt_f -D "$chain" "$index" 2>/dev/null
@@ -1549,6 +1623,8 @@ del_firewall_rule() {
 	$ipt_f -X PSW_OPENVPN_INPUT 2>/dev/null
 	$ipt_f -F PSW_OPENVPN 2>/dev/null
 	$ipt_f -X PSW_OPENVPN 2>/dev/null
+	$ipt_f -F PSW_OPENVPN_OUTPUT 2>/dev/null
+	$ipt_f -X PSW_OPENVPN_OUTPUT 2>/dev/null
 	for ipt in "$ipt_f" "$ip6t_f"; do
 		for chain in "FORWARD" "INPUT" "OUTPUT"; do
 			for i in $(seq 1 $($ipt -nL $chain | grep -c PSW_REJECT)); do
@@ -1678,7 +1754,7 @@ get_ip6t_bin() {
 }
 
 start() {
-	[ "$ENABLED_DEFAULT_ACL" = 0 ] && [ "$ENABLED_ACLS" = 0 ] && [ "$REJECT_IPV6" != 1 ] && return
+	[ "$ENABLED_DEFAULT_ACL" = 0 ] && [ "$ENABLED_ACLS" = 0 ] && [ "$GLOBAL_OPENVPN" != 1 ] && [ "$REJECT_IPV6" != 1 ] && return
 	add_firewall_rule
 	gen_include
 }

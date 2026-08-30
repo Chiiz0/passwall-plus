@@ -21,6 +21,24 @@ valid_ipv4() {
 	} { exit 1 }'
 }
 
+normalize_ipv4_cidr() {
+	local value="$1" address prefix
+	case "$value" in
+		*/*)
+			address=${value%/*}
+			prefix=${value##*/}
+			;;
+		*)
+			address=$value
+			prefix=32
+			;;
+	esac
+	valid_ipv4 "$address" || return 1
+	case "$prefix" in ""|*[!0-9]*) return 1 ;; esac
+	[ "$prefix" -ge 0 ] && [ "$prefix" -le 32 ] || return 1
+	printf '%s/%s\n' "$address" "$prefix"
+}
+
 node_dir() {
 	echo "${OPENVPN_NODE_PATH}/$1"
 }
@@ -95,6 +113,7 @@ sanitize_profile() {
 
 resolve_preproxy_ipv4() {
 	local host="$1" resolved response candidate
+	case "$host" in ""|-*|*[!A-Za-z0-9_.-]*) return 1 ;; esac
 	resolved=$(get_host_ip ipv4 "$host" 3)
 	if valid_ipv4 "$resolved"; then
 		echo "$resolved"
@@ -148,10 +167,123 @@ lan_subnets() {
 	done | awk '!seen[$0]++'
 }
 
+append_acl_sources() {
+	local output="$1" sid candidates source normalized
+	local items=$(uci show ${CONFIG} | grep "=acl_rule" | cut -d '.' -sf 2 | cut -d '=' -sf 1)
+	for sid in $items; do
+		[ "$(config_n_get "$sid" enabled 0)" = "1" ] || continue
+		case "$output" in
+			global_sources)
+				[ "$(config_n_get "$sid" mode 0)" = "1" ] || continue
+				[ "$(config_n_get "$sid" use_global_config 0)" = "1" ] || continue
+				;;
+			bypass_sources)
+				if [ "$(config_n_get "$sid" mode 0)" = "1" ] && [ "$(config_n_get "$sid" use_global_config 0)" = "1" ]; then
+					continue
+				fi
+				;;
+			*) return 1 ;;
+		esac
+
+		if [ "$(config_n_get "$sid" bind_enable 0)" = "1" ]; then
+			candidates=$(config_n_get "$sid" bind_ip)
+		else
+			candidates=$(config_n_get "$sid" sources)
+		fi
+		[ -n "$candidates" ] || candidates=$(lan_subnets)
+		for source in $candidates; do
+			normalized=$(normalize_ipv4_cidr "$source") || continue
+			printf '%s|%s\n' "$normalized" "$sid" >> "$output"
+		done
+	done
+}
+
+collect_global_sources() {
+	local dir="$1" client="$2" source
+	: > "$dir/global_sources"
+	: > "$dir/bypass_sources"
+	if [ "$client" = "1" ]; then
+		for source in $(lan_subnets); do
+			normalize_ipv4_cidr "$source" >/dev/null || continue
+			printf '%s|default\n' "$source" >> "$dir/global_sources"
+		done
+	fi
+	(
+		cd "$dir" || exit 1
+		append_acl_sources global_sources
+		append_acl_sources bypass_sources
+	)
+	awk -F'|' '!seen[$1]++' "$dir/global_sources" > "$dir/global_sources.tmp"
+	mv "$dir/global_sources.tmp" "$dir/global_sources"
+	awk -F'|' '!seen[$1]++' "$dir/bypass_sources" > "$dir/bypass_sources.tmp"
+	mv "$dir/bypass_sources.tmp" "$dir/bypass_sources"
+}
+
 ensure_killswitch() {
 	local table="$1"
 	ip -4 route show table "$table" 2>/dev/null | grep -q '^unreachable default.*metric 42760' || \
 		ip -4 route add unreachable default metric 42760 table "$table" 2>/dev/null
+}
+
+clear_recorded_global_policy() {
+	local dir="$1" priority from to iif table
+	[ -f "$dir/global_policy_rules" ] || return 0
+	while IFS='|' read -r priority from to iif table; do
+		case "$priority:$table" in *[!0-9:]*|:*|*:) continue ;; esac
+		set -- priority "$priority"
+		[ "$from" = "-" ] || set -- "$@" from "$from"
+		[ "$to" = "-" ] || set -- "$@" to "$to"
+		[ "$iif" = "-" ] || set -- "$@" iif "$iif"
+		set -- "$@" fwmark 0/0xffffffff lookup "$table"
+		while ip -4 rule del "$@" 2>/dev/null; do :; done
+	done < "$dir/global_policy_rules"
+	: > "$dir/global_policy_rules"
+}
+
+add_global_policy_rule() {
+	local dir="$1" priority="$2" from="$3" to="$4" iif="$5" table="$6" record
+	record="${priority}|${from}|${to}|${iif}|${table}"
+	grep -Fqx "$record" "$dir/global_policy_rules" 2>/dev/null && return 0
+	set -- priority "$priority"
+	[ "$from" = "-" ] || set -- "$@" from "$from"
+	[ "$to" = "-" ] || set -- "$@" to "$to"
+	[ "$iif" = "-" ] || set -- "$@" iif "$iif"
+	set -- "$@" fwmark 0/0xffffffff lookup "$table"
+	ip -4 rule add "$@" 2>/dev/null || return 1
+	printf '%s\n' "$record" >> "$dir/global_policy_rules"
+}
+
+refresh_global_policy() {
+	local node="$1" dir table client localhost allow_lan source sid subnet
+	dir=$(node_dir "$node")
+	[ -f "$dir/global" ] || return 0
+	table=$(cat "$dir/table" 2>/dev/null)
+	case "$table" in ""|*[!0-9]*) return 1 ;; esac
+	IFS='|' read -r client localhost allow_lan < "$dir/global"
+	clear_recorded_global_policy "$dir"
+	ensure_killswitch "$table"
+
+	while IFS='|' read -r source sid; do
+		normalize_ipv4_cidr "$source" >/dev/null || continue
+		add_global_policy_rule "$dir" 105 "$source" - - 254
+	done < "$dir/bypass_sources"
+
+	while IFS='|' read -r source sid; do
+		normalize_ipv4_cidr "$source" >/dev/null || continue
+		if [ "$allow_lan" = "1" ]; then
+			for subnet in $(lan_subnets); do
+				add_global_policy_rule "$dir" 100 "$source" "$subnet" - 254
+			done
+		fi
+		add_global_policy_rule "$dir" 110 "$source" - - "$table"
+	done < "$dir/global_sources"
+
+	if [ "$localhost" = "1" ]; then
+		for subnet in $(lan_subnets); do
+			add_global_policy_rule "$dir" 100 - "$subnet" lo 254
+		done
+		add_global_policy_rule "$dir" 111 - - lo "$table"
+	fi
 }
 
 refresh_policy() {
@@ -180,7 +312,7 @@ refresh_policy() {
 }
 
 generate_config() {
-	local node="$1" preproxy_port="$2" dir profile username password preproxy tmp resolved_tmp
+	local node="$1" preproxy_port="$2" resolve_remote="$3" dir profile username password preproxy tmp resolved_tmp
 	dir=$(node_dir "$node")
 	profile=$(config_n_get "$node" config)
 	username=$(config_n_get "$node" username)
@@ -190,7 +322,7 @@ generate_config() {
 	tmp="${dir}/client.conf.tmp"
 
 	printf '%s\n' "$profile" | sanitize_profile "$preproxy" > "$tmp" || return 1
-	if [ "$preproxy" = "1" ]; then
+	if [ "$preproxy" = "1" ] || [ "$resolve_remote" = "1" ]; then
 		resolved_tmp="${tmp}.resolved"
 		resolve_preproxy_remotes < "$tmp" > "$resolved_tmp" || return 1
 		mv "$resolved_tmp" "$tmp" || return 1
@@ -248,13 +380,13 @@ register_acl() {
 	local block_only="$7" dir table priority lan_priority dev dns source_line needs_config=0
 	valid_id "$node" && valid_id "$sid" && valid_ipv4 "$ip" || return 1
 	[ "$(config_n_get "$node" type)" = "OpenVPN" ] || return 1
-	case "$slot" in ""|*[!0-9]*) return 1 ;; esac
-	[ "$slot" -ge 1 ] && [ "$slot" -le 999 ] || return 1
 	case "$preproxy_port" in ""|*[!0-9]*) [ -z "$preproxy_port" ] || return 1 ;; esac
 	[ -z "$preproxy_port" ] || { [ "$preproxy_port" -ge 1 ] && [ "$preproxy_port" -le 65535 ]; } || return 1
 
 	dir=$(node_dir "$node")
 	if [ ! -d "$dir" ]; then
+		case "$slot" in ""|*[!0-9]*) return 1 ;; esac
+		[ "$slot" -ge 1 ] && [ "$slot" -le 999 ] || return 1
 		mkdir -p "$dir" || return 1
 		chmod 700 "$OPENVPN_PATH" "$OPENVPN_NODE_PATH" "$dir" 2>/dev/null
 		table=$((20000 + slot))
@@ -282,6 +414,42 @@ register_acl() {
 	[ "$needs_config" = "0" ] || generate_config "$node" "$preproxy_port"
 }
 
+register_global() {
+	local node="$1" client="$2" localhost="$3" allow_lan="$4" preproxy_port="$5"
+	local dir table dev dns config_status=0
+	valid_id "$node" || return 1
+	[ "$(config_n_get "$node" type)" = "OpenVPN" ] || return 1
+	[ "$client" = "0" ] || [ "$client" = "1" ] || return 1
+	[ "$localhost" = "0" ] || [ "$localhost" = "1" ] || return 1
+	[ "$allow_lan" = "0" ] || [ "$allow_lan" = "1" ] || return 1
+	case "$preproxy_port" in ""|*[!0-9]*) [ -z "$preproxy_port" ] || return 1 ;; esac
+	[ -z "$preproxy_port" ] || { [ "$preproxy_port" -ge 1 ] && [ "$preproxy_port" -le 65535 ]; } || return 1
+
+	dir=$(node_dir "$node")
+	if [ ! -d "$dir" ]; then
+		mkdir -p "$dir" || return 1
+		chmod 700 "$OPENVPN_PATH" "$OPENVPN_NODE_PATH" "$dir" 2>/dev/null
+		printf '20000\n' > "$dir/table"
+		printf '101\n' > "$dir/priority"
+		printf '100\n' > "$dir/lan_priority"
+		printf 'pswov0\n' > "$dir/dev"
+		dns=$(config_n_get "$node" vpn_dns 1.1.1.1)
+		valid_ipv4 "$dns" || dns="1.1.1.1"
+		printf '%s\n' "$dns" > "$dir/dns"
+		printf '%s\n' "$preproxy_port" > "$dir/preproxy_port"
+		: > "$dir/sources"
+	fi
+
+	table=$(cat "$dir/table" 2>/dev/null)
+	dev=$(cat "$dir/dev" 2>/dev/null)
+	[ "$table" = "20000" ] && [ "$dev" = "pswov0" ] || return 1
+	printf '%s|%s|%s\n' "$client" "$localhost" "$allow_lan" > "$dir/global"
+	collect_global_sources "$dir" "$client"
+	generate_config "$node" "$preproxy_port" 1 || config_status=1
+	refresh_global_policy "$node"
+	return "$config_status"
+}
+
 tunnel_up() {
 	local node="$PASSWALL_OPENVPN_NODE" dir table managed_dev
 	[ -e "$OPENVPN_PATH/stopping" ] && return 0
@@ -294,6 +462,7 @@ tunnel_up() {
 	ip -4 route add default dev "$dev" metric 10 table "$table" 2>/dev/null
 	ensure_killswitch "$table"
 	refresh_policy "$node"
+	refresh_global_policy "$node"
 	echolog "OpenVPN 节点[$node]隧道[$dev]已接通。"
 }
 
@@ -330,6 +499,7 @@ cleanup_node() {
 	lan_priority=$(cat "$dir/lan_priority" 2>/dev/null)
 	table=$(cat "$dir/table" 2>/dev/null)
 	dev=$(cat "$dir/dev" 2>/dev/null)
+	clear_recorded_global_policy "$dir"
 	while IFS='|' read -r ip allow_lan sid; do
 		valid_ipv4 "$ip" || continue
 		case "$priority" in
@@ -365,6 +535,13 @@ stop_all() {
 }
 
 case "$1" in
+	resolve-ipv4)
+		resolve_preproxy_ipv4 "$2"
+		;;
+	global)
+		shift
+		register_global "$@"
+		;;
 	register)
 		shift
 		register_acl "$@"

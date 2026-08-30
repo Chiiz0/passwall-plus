@@ -1,8 +1,8 @@
 # PassWall Plus
 
-PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/Openwrt-Passwall/openwrt-passwall) 的增强分支，重点解决局域网设备身份绑定、按设备选择出口、明确拒绝 IPv6，以及单设备 OpenVPN 全流量转发。
+PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/Openwrt-Passwall/openwrt-passwall) 的增强分支，重点解决局域网设备身份绑定、按设备选择出口、明确拒绝 IPv6，以及全局和单设备 OpenVPN 全流量转发。
 
-当前源码版本：`26.8.26-r5`
+当前源码版本：`26.8.26-r6`
 
 > 仓库名称为 `passwall-plus`。为兼容现有 OpenWrt 软件包、LuCI 路径、UCI 配置和升级流程，内部包名继续使用 `luci-app-passwall`，配置仍位于 `/etc/config/passwall`。
 
@@ -14,7 +14,8 @@ PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/O
 | IP/MAC 强绑定 | 同时阻止绑定 MAC 使用其他 IPv4，以及其他 MAC 冒用绑定 IPv4 |
 | 单设备出口策略 | 不同设备可分别选择直连、全局配置、普通代理节点或 OpenVPN 节点 |
 | IPv6 明确拒绝 | 默认拒绝来自 `lan` 区域的 IPv6，不允许通过 IPv6 绕过设备策略 |
-| OpenVPN 全流量 | 将指定设备的 TCP、UDP、ICMP 和 DNS 全部送入独立 TUN 隧道 |
+| 全局 OpenVPN | 可将全部 LAN 客户端和路由器本机的 TCP、UDP、ICMP、DNS 接入同一 TUN 隧道 |
+| 单设备 OpenVPN | 可为指定设备选择独立 OpenVPN 节点和策略路由表，不影响其他设备 |
 | OpenVPN 防回落 | 隧道未建立或意外断开时保持阻断，不会静默切回 WAN |
 | OpenVPN 前置代理 | 可通过普通 Xray 或 Sing-box 节点提供的本机 SOCKS 连接 VPN 服务端 |
 | LAN 访问控制 | 可按设备决定使用 OpenVPN 时是否保留本地 LAN 访问 |
@@ -26,7 +27,7 @@ PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/O
 | 设备选择 | IPv4 出口 | 出口不可用时 | IPv6 |
 | --- | --- | --- | --- |
 | 直连 | OpenWrt WAN | 遵循系统路由 | 拒绝 |
-| 全局配置 | PassWall 全局节点 | 遵循全局策略 | 拒绝 |
+| 全局配置 | PassWall 全局节点，包括可选 OpenVPN | OpenVPN 模式阻断，否则遵循原有全局策略 | 拒绝 |
 | 独立代理节点 | 设备专属 Xray/Sing-box 等节点 | 遵循节点策略 | 拒绝 |
 | OpenVPN 节点 | 设备专属策略路由表和 TUN | 阻断公网，防止回落 | 拒绝 |
 
@@ -34,7 +35,7 @@ PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/O
 
 ## OpenVPN 集成
 
-编译时启用 `Include OpenVPN client`，在节点列表中新建 OpenVPN 节点并粘贴完整的 `.ovpn` 客户端配置。PassWall Plus 会为每个实际使用的 OpenVPN 节点创建独立的：
+编译时启用 `Include OpenVPN client`，在节点列表中新建 OpenVPN 节点并粘贴完整的 `.ovpn` 客户端配置。OpenVPN 节点既可以选作 PassWall 全局节点，也可以只分配给访问控制中的单台设备。PassWall Plus 会为每个实际使用的 OpenVPN 节点创建独立的：
 
 - TUN 设备和 IPv4 策略路由表；
 - 源地址路由规则、出口 NAT 和防火墙转发规则；
@@ -42,7 +43,9 @@ PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/O
 - 强制通过隧道访问的 IPv4 DNS 规则；
 - 可选的 Xray/Sing-box SOCKS 前置进程。
 
-同一个 OpenVPN 节点可以分配给多台已绑定设备。每台设备仍使用自己的静态租约、IP/MAC 校验和访问控制条目。
+全局 OpenVPN 固定使用 `pswov0` 和策略路由表 `20000`；仅由设备使用的 OpenVPN 节点从 `pswov1` 和表 `20001` 开始分配。同一个节点同时被全局配置和设备条目引用时会复用同一进程和 TUN，不会重复拨号。
+
+全局模式可分别使用 PassWall 原有的“代理局域网设备”和“代理本机”开关控制 LAN 与路由器本机。选择“使用全局配置”的访问控制条目继承全局 OpenVPN；选择直连、独立普通代理或独立 OpenVPN 的条目会按自己的策略优先于全局规则。每台绑定设备仍使用自己的静态租约、IP/MAC 校验和访问控制条目。
 
 ### IPv4 与配置约束
 
@@ -111,11 +114,12 @@ git clone https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git pack
 1. 在“节点列表”中添加或订阅普通代理节点。
 2. 如需 OpenVPN，在“节点列表”中新建 OpenVPN 节点并导入客户端配置。
 3. 如需前置跳板，在 OpenVPN 节点中选择普通 Xray 或 Sing-box 节点。
-4. 打开“访问控制”，为设备启用 IP/MAC 绑定并填写固定 IPv4、MAC 和可选主机名。
-5. 为该设备选择直连、全局配置、普通代理节点或 OpenVPN 节点。
-6. 保存并应用，然后让客户端重新获取 DHCP 地址。
+4. 全局使用时，在“基本设置”的主节点中直接选择 OpenVPN，并设置是否保留本地 LAN 访问。
+5. 按设备使用时，打开“访问控制”，为设备启用 IP/MAC 绑定并填写固定 IPv4、MAC 和可选主机名。
+6. 为该设备选择直连、全局配置、普通代理节点或 OpenVPN 节点。
+7. 保存并应用，然后让客户端重新获取 DHCP 地址。
 
-使用 OpenVPN 时，可以为访问控制条目单独设置“允许本地 LAN 访问”。关闭后，除 DHCP 外，该设备只能通过已建立的 VPN 隧道通信。
+全局 OpenVPN 的“允许本地 LAN 访问”位于基本设置；独立 OpenVPN 设备也可以在访问控制条目中单独设置。关闭后，除 DHCP 外，受管设备只能通过已建立的 VPN 隧道通信。
 
 ## 验证建议
 
@@ -153,6 +157,11 @@ ip -4 route show table all
 | 隧道断开防回落与 LAN 保留 | 通过 |
 | OpenVPN 经 Sing-box/VMess 前置 | 通过 |
 | OpenVPN 经 Xray/VMess 前置 | 通过 |
+| 全局 LAN 与路由器本机 TCP、ICMP、DNS、NAT | 通过 |
+| 全局 OpenVPN 断线防回落与 LAN 隔离 | 通过 |
+| 全局 OpenVPN 经 Sing-box/VMess 前置 | 通过 |
+| 全局 OpenVPN 经 Xray/VMess 前置 | 通过 |
+| 全局 OpenVPN 与直连、继承、独立设备策略并存 | 通过 |
 
 测试环境包含 Linux `6.12.103`、OpenVPN `2.7.6` 和 Xray `26.7.28`。
 

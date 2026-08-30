@@ -20,6 +20,7 @@ config global
 	option udp_proxy_mode 'proxy'
 	option localhost_proxy '1'
 	option client_proxy '1'
+	option openvpn_global_allow_lan '1'
 	option acl_enable '0'
 	option reject_ipv6 '1'
 	list ipv6_reject_zones 'lan'

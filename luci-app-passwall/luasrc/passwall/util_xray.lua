@@ -961,6 +961,9 @@ function gen_config(var)
 		local rules = {}
 		if node then
 			if server_host and server_port then
+				if (not node.tls_serverName or node.tls_serverName == "") and api.datatypes.hostname(node.address) then
+					node.tls_serverName = node.address
+				end
 				node.address = server_host
 				node.port = server_port
 			end

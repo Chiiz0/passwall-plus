@@ -15,12 +15,11 @@ m:appendTemplate("/cbi/nodes_listvalue_com")
 
 local nodes_table = {}
 for _, e in ipairs(api.get_valid_nodes()) do
-	if e.node_type ~= "openvpn" then
-		nodes_table[#nodes_table + 1] = e
-	end
+	nodes_table[#nodes_table + 1] = e
 end
 
 local normal_list = {}
+local openvpn_list = {}
 local balancing_list = {}
 local urltest_list = {}
 local shunt_list = {}
@@ -28,6 +27,8 @@ local iface_list = {}
 for _, v in pairs(nodes_table) do
 	if v.node_type == "normal" then
 		normal_list[#normal_list + 1] = v
+	elseif v.node_type == "openvpn" then
+		openvpn_list[#openvpn_list + 1] = v
 	end
 	if v.protocol and v.protocol == "_balancing" then
 		balancing_list[#balancing_list + 1] = v
@@ -135,7 +136,7 @@ if (has_singbox or has_xray) and #nodes_table > 0 then
 				tab_desc = translate("Shunt Rule")
 			})
 		end
-	else
+	elseif #openvpn_list == 0 then
 		local tips = s:taboption("Main", DummyValue, "tips", "　")
 		tips.rawhtml = true
 		tips.cfgvalue = function(t, n)
@@ -172,6 +173,16 @@ o = s:taboption("Main", DummyValue, "_node_sel_shunt", "")
 o.template = m:template_path("/cbi/hidevalue")
 o.value = "1"
 o:depends({ node = "__always__" })
+
+o = s:taboption("Main", DummyValue, "_node_sel_openvpn", "")
+o.template = m:template_path("/cbi/hidevalue")
+o.value = "1"
+o:depends({ node = "__passwall_openvpn_node__" })
+
+o = s:taboption("Main", Flag, "openvpn_global_allow_lan", translate("Allow local LAN access"), translate("In global OpenVPN mode, keep destinations on the selected LAN firewall zones reachable directly. Disable this to isolate managed clients from local LAN services except DHCP."))
+o.default = "1"
+o.rmempty = false
+o:depends({ _node_sel_openvpn = "1" })
 
 o = s:taboption("Main", DummyValue, "_node_sel_other", "")
 o.template = m:template_path("/cbi/hidevalue")
@@ -746,10 +757,14 @@ for k, v in pairs(socks_list) do
 	o_node.group[#o_node.group+1] = (v.group and v.group ~= "") and v.group or translate("default")
 end
 for k, v in pairs(nodes_table) do
-	if #normal_list == 0 and #iface_list == 0 then
+	if #normal_list == 0 and #iface_list == 0 and #openvpn_list == 0 then
 		break
 	end
-	if v.protocol == "_shunt" then
+	if v.node_type == "openvpn" then
+		o_node:value(v.id, v["remark"])
+		o_node.group[#o_node.group+1] = (v.group and v.group ~= "") and v.group or "OpenVPN"
+		s.fields["_node_sel_openvpn"]:depends({ node = v.id })
+	elseif v.protocol == "_shunt" then
 		if has_singbox or has_xray then
 			o_node:value(v.id, v["remark"])
 			o_node.group[#o_node.group+1] = (v.group and v.group ~= "") and v.group or translate("default")
@@ -766,7 +781,9 @@ for k, v in pairs(nodes_table) do
 		o_node:value(v.id, v["remark"])
 		o_node.group[#o_node.group+1] = (v.group and v.group ~= "") and v.group or translate("default")
 	end
-	if v.type == "Socks" then
+	if v.node_type == "openvpn" then
+		-- OpenVPN is an outbound tunnel and cannot back a local SOCKS service.
+	elseif v.type == "Socks" then
 		if has_singbox or has_xray then
 			o_socks:value(v.id, v["remark"])
 			o_socks.group[#o_socks.group+1] = (v.group and v.group ~= "") and v.group or translate("default")

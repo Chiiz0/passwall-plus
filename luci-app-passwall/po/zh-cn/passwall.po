@@ -2279,3 +2279,6 @@ msgstr "允许访问本地 LAN"
 
 msgid "Keep destinations on the selected LAN firewall zones reachable directly while all other IPv4 traffic uses OpenVPN."
 msgstr "所选 LAN 防火墙区域内的目标保持直连，其余全部 IPv4 流量使用 OpenVPN。"
+
+msgid "In global OpenVPN mode, keep destinations on the selected LAN firewall zones reachable directly. Disable this to isolate managed clients from local LAN services except DHCP."
+msgstr "全局 OpenVPN 模式下，所选 LAN 防火墙区域内的目标保持直连。关闭后，受管客户端除 DHCP 外不能访问本地 LAN 服务。"
