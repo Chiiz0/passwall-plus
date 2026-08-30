@@ -126,8 +126,10 @@ make image \
 	ROOTFS_PARTSIZE="${ROOTFS_PARTSIZE}"
 
 TARGET_OUTPUT="${IMAGEBUILDER_DIR}/bin/targets/${OPENWRT_TARGET}/${OPENWRT_SUBTARGET}"
+# GitHub release asset names are case-insensitive; publish only our final SHA256SUMS.
+rm --force "${DIST_DIR}/sha256sums"
 find "${TARGET_OUTPUT}" -maxdepth 1 -type f \
-	\( -name '*.img.gz' -o -name '*.json' -o -name '*.manifest' -o -name 'sha256sums' \) \
+	\( -name '*.img.gz' -o -name '*.json' -o -name '*.manifest' \) \
 	-exec cp --force --target-directory "${DIST_DIR}" {} +
 
 make manifest PROFILE=generic PACKAGES="${PACKAGE_LIST}" > "${DIST_DIR}/packages.manifest"
