@@ -1,0 +1,47 @@
+# LuCI and Chinese translations
+luci-ssl
+luci-app-package-manager
+luci-i18n-base-zh-cn
+luci-i18n-firewall-zh-cn
+luci-i18n-package-manager-zh-cn
+
+# PassWall Plus and supported outbound engines
+luci-app-passwall
+luci-i18n-passwall-zh-cn
+chinadns-ng
+dns2socks
+ipt2socks
+microsocks
+openvpn-openssl
+tcping
+xray-core
+sing-box
+dnsmasq-full
+-dnsmasq
+
+# Runtime and diagnostics
+ca-bundle
+ca-certificates
+curl
+ethtool
+ip-full
+tcpdump
+
+# Official firewall4/nftables transparent proxy stack
+kmod-tun
+kmod-nf-reject
+kmod-nf-reject6
+kmod-nft-nat
+kmod-nft-socket
+kmod-nft-tproxy
+
+# VMware, common physical NICs, and QEMU/virtio
+kmod-e1000
+kmod-e1000e
+kmod-vmxnet3
+
+# This firmware intentionally has no IPv6 client/RA service or UPnP fork.
+-odhcp6c
+-odhcpd-ipv6only
+-luci-proto-ipv6
+-miniupnpd-nftables

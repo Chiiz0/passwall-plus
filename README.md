@@ -6,6 +6,21 @@ PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/O
 
 > 仓库名称为 `passwall-plus`。为兼容现有 OpenWrt 软件包、LuCI 路径、UCI 配置和升级流程，内部包名继续使用 `luci-app-passwall`，配置仍位于 `/etc/config/passwall`。
 
+## 专属 OpenWrt 固件
+
+仓库现在包含基于官方 OpenWrt `25.12.5` 的可复现 x86/64 固件构建。它固定官方 SDK、ImageBuilder、全部 OpenWrt feed 及 PassWall 依赖 feed，不使用 Kwrt 的滚动软件源、fullcone 改动或自定义 miniupnp 包。
+
+成品固件直接包含 PassWall Plus、OpenVPN、Xray、Sing-box、LuCI 简体中文和 VMware/QEMU 驱动，并生成 BIOS/UEFI、ext4/squashfs 及 VMware VMDK 镜像。默认双网卡定义为：
+
+| 接口 | 用途 | 默认配置 |
+| --- | --- | --- |
+| `eth0` | LAN | `10.0.0.1/24`，提供 DHCP |
+| `eth1` | WAN | DHCP，从 VMware NAT 获取地址 |
+
+IPv6 会从内核 sysctl、WAN/LAN 接口、RA/DHCPv6 和 PassWall 同时关闭，LAN 防火墙仍保留一条显式 IPv6 `REJECT` 规则。构建和 QEMU 验证方法见 [openwrt/README.md](openwrt/README.md)。固件不内置订阅、`.ovpn`、私钥或默认密码。
+
+当前固件已用双 e1000 网卡实际启动验证：WAN DHCP、LuCI、OpenVPN/Xray/Sing-box、IPv6 禁用、`fw4 check` 和 `fw4 reload` 均通过，内核日志没有 nftables 段错误。由此绕开 Kwrt 的固件基线问题，而不是在 PassWall 中掩盖 `libnftables` 崩溃。
+
 ## 核心能力
 
 | 能力 | 行为 |
@@ -169,6 +184,7 @@ ip -4 route show table all
 
 - firewall4 环境会优先识别真实 `fw4` 后端，不会被某些固件提供的 `/sbin/fw3 -> fw4` 兼容链接误导。
 - 部分第三方 Kwrt 快照中的 `nft 1.1.6` 可能在执行 `fw4 reload` 时段错误。该问题在停止 PassWall 并删除 `inet passwall` 表后仍可复现，属于固件的 nftables/firewall4 基线问题；建议更新固件或相关组件。
+- 本仓库的专属固件使用 OpenWrt 25.12.5 官方 firewall4/nftables 构建组合，QEMU 实测 `fw4 reload` 正常且 `dmesg` 无崩溃，可直接作为该 Kwrt 问题的替代方案。
 - IPv6 拒绝区域默认是 `lan`，多 LAN 或自定义防火墙区域应在 PassWall 全局配置中明确加入。
 
 ## 上游与许可证

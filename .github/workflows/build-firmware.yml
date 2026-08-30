@@ -1,0 +1,39 @@
+name: Build dedicated OpenWrt firmware
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'firmware-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-x86-64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            build-essential clang flex bison g++ gawk gcc-multilib gettext \
+            git libncurses-dev libssl-dev python3-setuptools qemu-system-x86 \
+            qemu-utils rsync swig unzip zlib1g-dev zstd
+
+      - name: Build firmware
+        run: ./openwrt/scripts/build-firmware.sh
+
+      - name: Boot and verify firmware
+        run: ./openwrt/scripts/test-qemu.sh
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: passwall-plus-openwrt-25.12.5-x86-64
+          path: dist/openwrt/25.12.5/
+          if-no-files-found: error
+          retention-days: 14
