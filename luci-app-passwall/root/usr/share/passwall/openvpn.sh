@@ -93,6 +93,29 @@ sanitize_profile() {
 		'
 }
 
+resolve_preproxy_ipv4() {
+	local host="$1" resolved response candidate
+	resolved=$(get_host_ip ipv4 "$host" 3)
+	if valid_ipv4 "$resolved"; then
+		echo "$resolved"
+		return 0
+	fi
+
+	# Keep remote resolution available when PassWall's local DNS path is not up yet.
+	command -v curl >/dev/null 2>&1 || return 1
+	command -v jsonfilter >/dev/null 2>&1 || return 1
+	response=$(curl -4 -fsS --connect-timeout 3 --max-time 5 \
+		-H 'accept: application/dns-json' \
+		"https://1.1.1.1/dns-query?name=${host}&type=A" 2>/dev/null) || return 1
+	for candidate in $(printf '%s' "$response" | jsonfilter -e '@.Answer[@.type=1].data' 2>/dev/null); do
+		if valid_ipv4 "$candidate"; then
+			echo "$candidate"
+			return 0
+		fi
+	done
+	return 1
+}
+
 resolve_preproxy_remotes() {
 	local line remote host port resolved
 	while IFS= read -r line; do
@@ -108,7 +131,7 @@ resolve_preproxy_remotes() {
 					resolved=$host
 				else
 					case "$host" in ""|-*|*[!A-Za-z0-9_.-]*) continue ;; esac
-					resolved=$(get_host_ip ipv4 "$host" 3)
+					resolved=$(resolve_preproxy_ipv4 "$host")
 					valid_ipv4 "$resolved" || continue
 				fi
 				printf 'remote %s%s\n' "$resolved" "${port:+ $port}"
