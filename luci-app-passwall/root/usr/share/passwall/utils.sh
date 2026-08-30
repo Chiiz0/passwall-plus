@@ -521,6 +521,33 @@ gen_lanlist_6() {
 	cat $RULES_PATH/lanlist_ipv6 | tr -s '\n' | grep -v "^#"
 }
 
+get_firewall_zone_devices() {
+	local zone section network device devices
+	for zone in "$@"; do
+		case "$zone" in
+			*[!A-Za-z0-9_.-]*|"") continue ;;
+		esac
+		for section in $(uci -q show firewall | sed -n "s/^firewall\.\([^.=]*\)\.name='${zone}'$/\1/p"); do
+			devices=$(uci -q get "firewall.${section}.device")
+			for device in $devices; do
+				case "$device" in
+					*[!A-Za-z0-9_.:-]*|"") ;;
+					*) echo "$device" ;;
+				esac
+			done
+			for network in $(uci -q get "firewall.${section}.network"); do
+				device=""
+				network_get_device device "$network"
+				[ -z "$device" ] && device=$(uci -q get "network.${network}.device")
+				case "$device" in
+					*[!A-Za-z0-9_.:-]*|"") ;;
+					*) echo "$device" ;;
+				esac
+			done
+		done
+	done | awk '!seen[$0]++'
+}
+
 get_wan_ips() {
 	local family="$1"
 	local NET_ADDR

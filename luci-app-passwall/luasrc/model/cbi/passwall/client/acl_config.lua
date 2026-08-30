@@ -1,4 +1,5 @@
 local api = require "luci.passwall.api"
+local device_policy = require "luci.passwall.device_policy"
 api.set_default_cbi()
 
 m = Map()
@@ -26,9 +27,14 @@ for _, e in ipairs(api.get_valid_nodes()) do
 end
 
 local normal_list = {}
+local openvpn_list = {}
+local openvpn_ids = {}
 for _, v in pairs(nodes_table) do
 	if v.node_type == "normal" then
 		normal_list[#normal_list + 1] = v
+	elseif v.node_type == "openvpn" then
+		openvpn_list[#openvpn_list + 1] = v
+		openvpn_ids[v.id] = true
 	end
 end
 
@@ -60,6 +66,16 @@ o = s:option(Value, "remarks", translate("Remarks"))
 o.default = arg[1]
 o.rmempty = false
 
+o = s:option(Flag, "bind_enable", translate("Enable IP/MAC binding"), translate("Create a permanent DHCP lease and enforce the IP/MAC pair before applying this device policy."))
+o.default = "0"
+o.rmempty = false
+o.write = function(self, section, value)
+	Flag.write(self, section, value)
+	if value == "1" then
+		m:set("@global[0]", "acl_enable", "1")
+	end
+end
+
 o = s:option(Value, "interface", translate("Source Interface"))
 o:value("", translate("All"))
 local iface = api.get_network_devices()
@@ -74,10 +90,22 @@ o.validate = function(self, value, section)
 end
 
 local mac_t = {}
+local lease_names = {}
+local lease_file = io.open("/tmp/dhcp.leases", "r")
+if lease_file then
+	for line in lease_file:lines() do
+		local _, mac, ip, hostname = line:match("^(%S+)%s+(%S+)%s+(%S+)%s+(%S+)")
+		if mac and ip then
+			lease_names[mac:upper()] = hostname ~= "*" and hostname or nil
+		end
+	end
+	lease_file:close()
+end
 api.sys.net.mac_hints(function(e, t)
 	mac_t[#mac_t + 1] = {
 		ip = t,
-		mac = e
+		mac = e:upper(),
+		hostname = lease_names[e:upper()]
 	}
 end)
 table.sort(mac_t, function(a,b)
@@ -93,6 +121,71 @@ table.sort(mac_t, function(a,b)
 	return false
 end)
 
+local function binding_duplicate(section, option, value)
+	local duplicate
+	m:foreach("acl_rule", function(rule)
+		if rule[".name"] ~= section and rule.bind_enable == "1" then
+			local current = rule[option]
+			if option == "bind_mac" then
+				current = device_policy.normalize_mac(current)
+			elseif option == "bind_ip" then
+				current = device_policy.normalize_ipv4(current)
+			end
+			if current == value then duplicate = rule.remarks or rule[".name"] end
+		end
+	end)
+	return duplicate
+end
+
+o = s:option(Value, "bind_mac", translate("Bound MAC address"))
+o.rmempty = false
+o:depends("bind_enable", "1")
+for _, client in ipairs(mac_t) do
+	local label = client.mac .. " (" .. client.ip
+	if client.hostname then label = label .. ", " .. client.hostname end
+	o:value(client.mac, label .. ")")
+end
+o.validate = function(self, value, section)
+	local mac = device_policy.normalize_mac(value)
+	if not mac then return nil, translate("Invalid MAC address") end
+	local duplicate = binding_duplicate(section, "bind_mac", mac)
+	if duplicate then
+		return nil, translatef("This MAC address is already bound by '%s'.", duplicate)
+	end
+	return mac
+end
+
+o = s:option(Value, "bind_ip", translate("Bound IPv4 address"))
+o.rmempty = false
+o:depends("bind_enable", "1")
+for _, client in ipairs(mac_t) do
+	o:value(client.ip, client.ip .. " (" .. client.mac .. ")")
+end
+o.validate = function(self, value, section)
+	local ip = device_policy.normalize_ipv4(value)
+	if not ip then
+		return nil, translate("Invalid IPv4 address")
+	end
+	if not device_policy.ip_in_lan(ip) then
+		return nil, translate("The IPv4 address is not a usable host address in the selected LAN firewall zones.")
+	end
+	local duplicate = binding_duplicate(section, "bind_ip", ip)
+	if duplicate then
+		return nil, translatef("This IPv4 address is already bound by '%s'.", duplicate)
+	end
+	local mac_field = s.fields["bind_mac"]
+	local mac = mac_field and mac_field:formvalue(section) or m:get(section, "bind_mac")
+	local conflict = device_policy.find_dhcp_conflict(mac, ip)
+	if conflict then
+		return nil, translatef("This binding conflicts with DHCP host '%s'.", conflict)
+	end
+	return ip
+end
+
+o = s:option(Value, "bind_hostname", translate("DHCP hostname"))
+o.datatype = "hostname"
+o:depends("bind_enable", "1")
+
 ---- Source
 sources = s:option(DynamicList, "sources", translate("Source"))
 sources.description = "<ul><li>" .. translate("Example:")
@@ -103,6 +196,7 @@ sources.description = "<ul><li>" .. translate("Example:")
 .. "</li><li>" .. translate("IPSet") .. ": ipset:lanlist"
 .. "</li></ul>"
 sources.cast = "string"
+sources:depends("bind_enable", "0")
 for _, key in pairs(mac_t) do
 	sources:value(key.mac, "%s (%s)" % {key.mac, key.ip})
 end
@@ -196,17 +290,39 @@ o.default = ""
 o:depends({ _hide_node_option = false, use_global_config = false })
 o.template = m:template_path("/cbi/nodes_listvalue")
 o.group = {}
+o.validate = function(self, value, section)
+	if openvpn_ids[value] then
+		local bind_enable = s.fields["bind_enable"]:formvalue(section) or m:get(section, "bind_enable")
+		local bind_ip = s.fields["bind_ip"]:formvalue(section) or m:get(section, "bind_ip")
+		local bind_mac = s.fields["bind_mac"]:formvalue(section) or m:get(section, "bind_mac")
+		if bind_enable ~= "1" or not device_policy.normalize_ipv4(bind_ip) or not device_policy.normalize_mac(bind_mac) then
+			return nil, translate("OpenVPN device forwarding requires a valid enabled IP/MAC binding.")
+		end
+	end
+	return value
+end
 
 o = s:option(DummyValue, "_acl_node_bool", "")
 o.template = m:template_path("/cbi/hidevalue")
 o.value = "1"
-o:depends({ node = "",  ['!reverse'] = true })
+o:depends({ node = "__passwall_proxy_node__" })
+
+o = s:option(DummyValue, "_node_sel_openvpn", "")
+o.template = m:template_path("/cbi/hidevalue")
+o.value = "1"
+o:depends({ node = "__passwall_openvpn_node__" })
+
+o = s:option(Flag, "openvpn_allow_lan", translate("Allow local LAN access"), translate("Keep destinations on the selected LAN firewall zones reachable directly while all other IPv4 traffic uses OpenVPN."))
+o.default = "1"
+o.rmempty = false
+o:depends({ _node_sel_openvpn = "1" })
 
 ---- Log
 o = s:option(Flag, "log", translate("Enable Node Log"))
 o.default = 0
 o.rmempty = false
 o:depends({ _hide_node_option = false, use_global_config = false })
+o:depends({ _node_sel_openvpn = "1" })
 
 o = s:option(ListValue, "loglevel", "Sing-Box/Xray " .. translate("Log Level"))
 o.default = "warn"
@@ -214,7 +330,7 @@ o:value("debug", "Debug")
 o:value("info", "Info")
 o:value("warn", "Warning")
 o:value("error", "Error")
-o:depends("log", "1")
+o:depends({ log = "1", _acl_node_bool = "1" })
 
 ---- TCP Proxy Drop Ports
 local TCP_PROXY_DROP_PORTS = m:get("@global_forwarding[0]", "tcp_proxy_drop_ports")
@@ -522,17 +638,23 @@ local o_node = s.fields["node"]
 for k, v in pairs(socks_list) do
 	o_node:value(v.id, v["remark"])
 	o_node.group[#o_node.group+1] = (v.group and v.group ~= "") and v.group or translate("default")
+	s.fields["_acl_node_bool"]:depends({ node = v.id })
 end
 for k, v in pairs(nodes_table) do
-	if #normal_list == 0 then
+	if #normal_list == 0 and #openvpn_list == 0 then
 		s.fields["dns_mode"]:depends({ _acl_node_bool = "1" })
 		break
 	end
-	if v.protocol == "_shunt" then
+	if v.node_type == "openvpn" then
+		o_node:value(v.id, v["remark"])
+		o_node.group[#o_node.group+1] = (v.group and v.group ~= "") and v.group or "OpenVPN"
+		s.fields["_node_sel_openvpn"]:depends({ node = v.id })
+	elseif v.protocol == "_shunt" then
 		if v.type == "Xray" and has_xray then
 			o_node:value(v.id, v["remark"])
 			o_node.group[#o_node.group+1] = (v.group and v.group ~= "") and v.group or translate("default")
 
+			s.fields["_acl_node_bool"]:depends({ node = v.id })
 			s.fields["xray_dns_mode"]:depends({ _acl_node_bool = "1", node = v.id })
 			s.fields["_node_sel_shunt"]:depends({ node = v.id })
 		end
@@ -540,6 +662,7 @@ for k, v in pairs(nodes_table) do
 			o_node:value(v.id, v["remark"])
 			o_node.group[#o_node.group+1] = (v.group and v.group ~= "") and v.group or translate("default")
 
+			s.fields["_acl_node_bool"]:depends({ node = v.id })
 			s.fields["singbox_dns_mode"]:depends({ _acl_node_bool = "1", node = v.id })
 			s.fields["_node_sel_shunt"]:depends({ node = v.id })
 			s.fields["remote_rewrite_ttl"]:depends({ _acl_node_bool = "1", node = v.id })
@@ -547,6 +670,7 @@ for k, v in pairs(nodes_table) do
 	else
 		o_node:value(v.id, v["remark"])
 		o_node.group[#o_node.group+1] = (v.group and v.group ~= "") and v.group or translate("default")
+		s.fields["_acl_node_bool"]:depends({ node = v.id })
 	end
 end
 

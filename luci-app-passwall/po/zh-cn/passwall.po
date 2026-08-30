@@ -58,6 +58,54 @@ msgstr "规则列表"
 msgid "Access control"
 msgstr "访问控制"
 
+msgid "Reject IPv6"
+msgstr "拒绝 IPv6"
+
+msgid "Reject all IPv6 traffic originating from the selected LAN firewall zones."
+msgstr "拒绝来自所选 LAN 防火墙区域的所有 IPv6 流量。"
+
+msgid "IPv6 reject source zones"
+msgstr "IPv6 拒绝源区域"
+
+msgid "Invalid firewall zone name"
+msgstr "无效的防火墙区域名称"
+
+msgid "Enable IP/MAC binding"
+msgstr "启用 IP/MAC 绑定"
+
+msgid "Create a permanent DHCP lease and enforce the IP/MAC pair before applying this device policy."
+msgstr "创建永久 DHCP 静态租约，并在应用设备策略前强制校验 IP/MAC 对。"
+
+msgid "Bound MAC address"
+msgstr "绑定 MAC 地址"
+
+msgid "Bound IPv4 address"
+msgstr "绑定 IPv4 地址"
+
+msgid "DHCP hostname"
+msgstr "DHCP 主机名"
+
+msgid "IP/MAC Binding"
+msgstr "IP/MAC 绑定"
+
+msgid "Invalid MAC address"
+msgstr "无效的 MAC 地址"
+
+msgid "Invalid IPv4 address"
+msgstr "无效的 IPv4 地址"
+
+msgid "This MAC address is already bound by '%s'."
+msgstr "该 MAC 地址已由“%s”绑定。"
+
+msgid "This IPv4 address is already bound by '%s'."
+msgstr "该 IPv4 地址已由“%s”绑定。"
+
+msgid "The IPv4 address is not a usable host address in the selected LAN firewall zones."
+msgstr "该 IPv4 地址不是所选 LAN 防火墙区域中的可用主机地址。"
+
+msgid "This binding conflicts with DHCP host '%s'."
+msgstr "该绑定与 DHCP 主机“%s”冲突。"
+
 msgid "Runtime Logs"
 msgstr "运行日志"
 
@@ -2183,3 +2231,51 @@ msgstr "密码套件"
 
 msgid "Configures the list of supported cipher suites, separated by :"
 msgstr "配置支持的密码套件列表，以冒号 (:) 分隔。"
+
+msgid "OpenVPN client profile"
+msgstr "OpenVPN 客户端配置"
+
+msgid "Paste the complete .ovpn client profile. PassWall removes profile directives that can execute commands or change system routing."
+msgstr "粘贴完整的 .ovpn 客户端配置。PassWall 会移除可执行命令或修改系统路由的配置指令。"
+
+msgid "OpenVPN client profile is required."
+msgstr "必须填写 OpenVPN 客户端配置。"
+
+msgid "OpenVPN client profile must not exceed 128 KiB."
+msgstr "OpenVPN 客户端配置不能超过 128 KiB。"
+
+msgid "OpenVPN client profile contains invalid data."
+msgstr "OpenVPN 客户端配置包含无效数据。"
+
+msgid "OpenVPN client profile must contain a remote directive."
+msgstr "OpenVPN 客户端配置必须包含 remote 指令。"
+
+msgid "Leave both username and password empty for certificate-only authentication."
+msgstr "仅使用证书认证时，用户名和密码均留空。"
+
+msgid "OpenVPN username and password must be configured together."
+msgstr "OpenVPN 用户名和密码必须同时配置。"
+
+msgid "OpenVPN DNS server"
+msgstr "OpenVPN DNS 服务器"
+
+msgid "All TCP and UDP port 53 traffic from devices assigned to this node is forced to this IPv4 DNS server through the tunnel."
+msgstr "分配到此节点的设备，其所有 TCP/UDP 53 端口流量都会被强制通过隧道发送到此 IPv4 DNS 服务器。"
+
+msgid "Pre-proxy node"
+msgstr "前置代理节点"
+
+msgid "Optionally connect OpenVPN through a local SOCKS endpoint backed by an Xray or Sing-box node. The OpenVPN server endpoint must support TCP."
+msgstr "可选通过 Xray 或 Sing-box 节点提供的本机 SOCKS 入口连接 OpenVPN。OpenVPN 服务器端点必须支持 TCP。"
+
+msgid "The OpenVPN pre-proxy must be a normal Xray or Sing-box node."
+msgstr "OpenVPN 前置代理必须是普通 Xray 或 Sing-box 节点。"
+
+msgid "OpenVPN device forwarding requires a valid enabled IP/MAC binding."
+msgstr "OpenVPN 设备转发需要启用并填写有效的 IP/MAC 绑定。"
+
+msgid "Allow local LAN access"
+msgstr "允许访问本地 LAN"
+
+msgid "Keep destinations on the selected LAN firewall zones reachable directly while all other IPv4 traffic uses OpenVPN."
+msgstr "所选 LAN 防火墙区域内的目标保持直连，其余全部 IPv4 流量使用 OpenVPN。"

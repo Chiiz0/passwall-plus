@@ -1343,13 +1343,22 @@ acl_app() {
 	else
 		local has_enabled
 		local sid
-		local socks_port redir_port dns_port dnsmasq_port chinadns_port
+		local socks_port redir_port dns_port dnsmasq_port chinadns_port openvpn_slot
 		local msg msg2
 		socks_port=11100
 		redir_port=11200
 		dns_port=11300
 		dnsmasq_port=${GLOBAL_DNSMASQ_PORT:-11400}
 		chinadns_port=11500
+		openvpn_slot=0
+		local openvpn_table_file existing_openvpn_slot
+		for openvpn_table_file in ${TMP_PATH}/openvpn/nodes/*/table; do
+			[ -f "$openvpn_table_file" ] || continue
+			existing_openvpn_slot=$(cat "$openvpn_table_file" 2>/dev/null)
+			case "$existing_openvpn_slot" in ""|*[!0-9]*) continue ;; esac
+			existing_openvpn_slot=$((existing_openvpn_slot - 20000))
+			[ "$existing_openvpn_slot" -ge 1 ] && [ "$existing_openvpn_slot" -le 999 ] && [ "$existing_openvpn_slot" -gt "$openvpn_slot" ] && openvpn_slot=$existing_openvpn_slot
+		done
 		for sid in $items; do
 			[ "$(config_n_get $sid enabled)" = "1" ] || continue
 			has_enabled=1
@@ -1357,6 +1366,7 @@ acl_app() {
 
 			log=${log:-0}
 			loglevel=${loglevel:-warn}
+			[ "${bind_enable:-0}" = "1" ] && sources="$bind_ip"
 
 			if [ -n "${sources}" ]; then
 				for s in $sources; do
@@ -1385,6 +1395,75 @@ acl_app() {
 			mkdir -p ${acl_path}
 			[ -n "${source_list}" ] && printf "%b\n" "${source_list}" | sed '/^$/d' > ${acl_path}/source_list
 
+			[ "${mode:-0}" != "1" ] && [ -n "$node" ] && [ "$(config_n_get "$node" type)" = "OpenVPN" ] && node=""
+			if [ "${mode:-0}" = "1" ] && [ "${use_global_config:-0}" != "1" ] && [ -n "$node" ] && [ "$(config_n_get "$node" type)" = "OpenVPN" ]; then
+				set_cache_var "ACL_${sid}_node" "$node"
+				set_cache_var "ACL_${sid}_openvpn" "1"
+				local openvpn_dir="${TMP_PATH}/openvpn/nodes/${node}"
+				local node_slot preproxy_node preproxy_port preproxy_type openvpn_bin binding_ip_valid=0
+				echo "$bind_ip" | awk -F. 'NF == 4 { for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]+$/ || $i > 255) exit 1; exit 0 } { exit 1 }' && binding_ip_valid=1
+				if [ -d "$openvpn_dir" ]; then
+					node_slot=$(cat "$openvpn_dir/table" 2>/dev/null)
+					case "$node_slot" in ""|*[!0-9]*) node_slot=20000 ;; esac
+					node_slot=$((node_slot - 20000))
+				else
+					openvpn_slot=$((openvpn_slot + 1))
+					node_slot=$openvpn_slot
+				fi
+				if [ "${bind_enable:-0}" != "1" ] || [ "$DEVICE_POLICY_VALID" = "0" ] || [ "$binding_ip_valid" != "1" ]; then
+					if [ "${bind_enable:-0}" = "1" ] && [ "$binding_ip_valid" = "1" ]; then
+						$APP_PATH/openvpn.sh block "$node" "$sid" "$bind_ip" "$node_slot" "${openvpn_allow_lan:-1}" >/dev/null 2>&1
+					fi
+					echolog "  - OpenVPN 策略【${remarks}】缺少有效且无冲突的 IP/MAC 绑定；有效的绑定地址已保持阻断，节点跳过启动。"
+				else
+					preproxy_node=$(config_n_get "$node" preproxy_node)
+					if [ -n "$preproxy_node" ]; then
+						preproxy_type=$(config_n_get "$preproxy_node" type)
+						case "$preproxy_type:$(config_n_get "$preproxy_node" protocol)" in
+							Xray:_*|sing-box:_*)
+								echolog "  - OpenVPN 节点[$node]的前置节点不是普通 Xray/Sing-box 节点，已忽略前置代理。"
+								preproxy_node=""
+								;;
+							Xray:*|sing-box:*) ;;
+							*)
+								echolog "  - OpenVPN 节点[$node]的前置节点无效，已忽略前置代理。"
+								preproxy_node=""
+								;;
+						esac
+					fi
+					if [ -n "$preproxy_node" ]; then
+						preproxy_port=$(cat "$openvpn_dir/preproxy_port" 2>/dev/null)
+						[ -n "$preproxy_port" ] || preproxy_port=$(get_new_port 11940)
+					fi
+
+					if $APP_PATH/openvpn.sh register "$node" "$sid" "$bind_ip" "$node_slot" "${openvpn_allow_lan:-1}" "$preproxy_port"; then
+						if [ -n "$preproxy_node" ] && [ ! -f "$openvpn_dir/preproxy_started" ]; then
+							local preproxy_log="/dev/null"
+							[ "$log" = "1" ] && preproxy_log="${acl_path}/openvpn_preproxy.log"
+							run_socks flag="openvpn_${node}" node="$preproxy_node" bind=127.0.0.1 socks_port="$preproxy_port" config_file="openvpn/${node}_preproxy.json" log_file="$preproxy_log"
+							touch "$openvpn_dir/preproxy_started"
+						fi
+
+						openvpn_bin=$(first_type openvpn)
+						if [ -z "$openvpn_bin" ]; then
+							echolog "  - 找不到 OpenVPN 客户端，节点[$node]未启动；绑定设备的防回落阻断继续生效。"
+						elif ! $APP_PATH/openvpn.sh running "$node" && ! busybox pgrep -f "$openvpn_dir/client.conf" >/dev/null 2>&1; then
+							local openvpn_log="/dev/null"
+							[ "$log" = "1" ] && openvpn_log="${acl_path}/openvpn.log"
+							rm -f "$openvpn_dir/openvpn.pid"
+							ln_run "$openvpn_bin" "openvpn_${node}" "$openvpn_log" --config "$openvpn_dir/client.conf"
+							echolog "  - OpenVPN 节点[$node]已启动，设备[$bind_ip]启用全流量隧道与防回落。"
+						fi
+					else
+						echolog "  - OpenVPN 节点[$node]配置生成失败，设备[$bind_ip]未放行。"
+					fi
+				fi
+
+				unset enabled sid remarks sources interface bind_enable bind_mac bind_ip bind_hostname openvpn_allow_lan
+				unset source_list node use_global_config log loglevel node_slot preproxy_node preproxy_port preproxy_type openvpn_bin openvpn_dir binding_ip_valid
+				continue
+			fi
+
 			use_global_config=${use_global_config:-0}
 			[ "${use_global_config}" = "1" ] && {
 				node="default"
@@ -1403,6 +1482,7 @@ acl_app() {
 				tcp_proxy_mode=${tcp_proxy_mode:-proxy}
 				udp_proxy_mode=${udp_proxy_mode:-proxy}
 				filter_proxy_ipv6=${filter_proxy_ipv6:-0}
+				[ "$REJECT_IPV6" = "1" ] && filter_proxy_ipv6=1
 				dnsmasq_filter_proxy_ipv6=${filter_proxy_ipv6}
 				dns_shunt=${dns_shunt:-dnsmasq}
 				dns_mode=${dns_mode:-dns2socks}
@@ -1597,7 +1677,7 @@ acl_app() {
 				fi
 				[ "${use_fakedns}" = "1" ] && set_cache_var "ACL_${sid}_fakedns" "1"
 			}
-			unset enabled sid remarks sources interface tcp_no_redir_ports udp_no_redir_ports use_global_config node use_direct_list use_proxy_list use_block_list use_gfw_list chn_list tcp_proxy_mode udp_proxy_mode filter_proxy_ipv6 dns_mode remote_dns v2ray_dns_mode remote_dns_doh remote_dns_client_ip
+			unset enabled sid remarks sources interface bind_enable bind_mac bind_ip bind_hostname openvpn_allow_lan tcp_no_redir_ports udp_no_redir_ports use_global_config node use_direct_list use_proxy_list use_block_list use_gfw_list chn_list tcp_proxy_mode udp_proxy_mode filter_proxy_ipv6 dns_mode remote_dns v2ray_dns_mode remote_dns_doh remote_dns_client_ip
 			unset _ip _mac _iprange _ipset _ip_or_mac source_list node_port config_file _extra_param dns_cache_key log loglevel
 			unset _china_ng_listen _chinadns_local_dns _direct_dns_mode chinadns_ng_default_tag dnsmasq_filter_proxy_ipv6 remote_fakedns force_https_soa use_fakedns remote_rewrite_ttl
 		done
@@ -1609,6 +1689,14 @@ acl_app() {
 	fi
 }
 
+sync_device_policies() {
+	DEVICE_POLICY_VALID=1
+	if ! lua -e 'local policy = require "luci.passwall.device_policy"; local ok = policy.sync_dhcp(); if not ok then os.exit(1) end' >/dev/null 2>&1; then
+		DEVICE_POLICY_VALID=0
+		echolog "设备策略同步存在冲突，所有可识别的绑定设备保持阻断，请检查访问控制配置。"
+	fi
+}
+
 start() {
 	busybox pgrep -f ${TMP_PATH}/bin > /dev/null 2>&1 && {
 		logger -t PSW-RESTART "Upgrade or overload residue is detected, and the subprocess is being called to perform complete cleaning..."
@@ -1616,6 +1704,7 @@ start() {
 		sleep 2
 	}
 	mkdir -p /tmp/etc /tmp/log $TMP_PATH $TMP_BIN_PATH $TMP_SCRIPT_FUNC_PATH $TMP_ROUTE_PATH $TMP_ACL_PATH $TMP_PATH2
+	sync_device_policies
 	get_config
 	export V2RAY_LOCATION_ASSET=$(config_n_get @global_rules[0] v2ray_location_asset "/usr/share/v2ray/")
 	export XRAY_LOCATION_ASSET=$V2RAY_LOCATION_ASSET
@@ -1675,6 +1764,7 @@ start() {
 stop() {
 	clean_log
 	eval_cache_var
+	$APP_PATH/openvpn.sh stop >/dev/null 2>&1
 	[ -n "$USE_TABLES" ] && source $APP_PATH/${USE_TABLES}.sh stop
 	delete_ip2route
 	# 结束 SS 插件进程
@@ -1739,6 +1829,8 @@ get_config() {
 
 	TCP_PROXY_WAY=$(config_n_get @global_forwarding[0] tcp_proxy_way redirect)
 	PROXY_IPV6=$(config_n_get @global_forwarding[0] ipv6_tproxy 0)
+	REJECT_IPV6=$(config_n_get @global[0] reject_ipv6 1)
+	IPV6_REJECT_ZONES=$(config_n_get @global[0] ipv6_reject_zones lan)
 	TCP_REDIR_PORTS=$(config_n_get @global_forwarding[0] tcp_redir_ports '80,443')
 	UDP_REDIR_PORTS=$(config_n_get @global_forwarding[0] udp_redir_ports '1:65535')
 	TCP_NO_REDIR_PORTS=$(config_n_get @global_forwarding[0] tcp_no_redir_ports 'disable')
@@ -1767,6 +1859,10 @@ get_config() {
 	REMOTE_DNS=$(normalize_dns "$(config_n_get @global[0] remote_dns 1.1.1.1:53)")
 	USE_DEFAULT_DNS=$(config_n_get @global[0] use_default_dns direct)
 	FILTER_PROXY_IPV6=$(config_n_get @global[0] filter_proxy_ipv6 0)
+	[ "$REJECT_IPV6" = "1" ] && {
+		PROXY_IPV6=0
+		FILTER_PROXY_IPV6=1
+	}
 	DNS_REDIRECT=$(config_n_get @global[0] dns_redirect 1)
 
 	REDIRECT_LIST="socks ss-rust ssr sing-box xray naiveproxy hysteria2"

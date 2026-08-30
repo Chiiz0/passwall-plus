@@ -196,12 +196,134 @@ get_jump_ipt() {
 	esac
 }
 
+load_device_guard() {
+	$ipt_m -N PSW_DEVICE_GUARD 2>/dev/null
+	$ipt_m -F PSW_DEVICE_GUARD
+	local has_ipv4_rules=0
+
+	if [ "$REJECT_IPV6" = "1" ]; then
+		local zone_device
+		for zone_device in $(get_firewall_zone_devices $IPV6_REJECT_ZONES); do
+			$ip6t_f -I INPUT -i "$zone_device" $(comment "PSW_REJECT_IPV6") -j REJECT --reject-with icmp6-adm-prohibited
+			$ip6t_f -I FORWARD -i "$zone_device" $(comment "PSW_REJECT_IPV6") -j REJECT --reject-with icmp6-adm-prohibited
+		done
+	fi
+
+	local sid mac ip interface device interface_match
+	local seen_macs="|" seen_ips="|"
+	local binding_sections=$(uci show ${CONFIG} | grep "=acl_rule" | cut -d '.' -sf 2 | cut -d '=' -sf 1)
+	for sid in $binding_sections; do
+		[ "$(config_n_get "$sid" enabled 0)" = "1" ] || continue
+		[ "$(config_n_get "$sid" bind_enable 0)" = "1" ] || continue
+		mac=$(config_n_get "$sid" bind_mac | tr 'a-f' 'A-F')
+		ip=$(config_n_get "$sid" bind_ip)
+		interface=$(config_n_get "$sid" interface)
+		echo "$mac" | grep -qE '^([0-9A-F]{2}:){5}[0-9A-F]{2}$' || continue
+		case "$seen_macs" in *"|${mac}|"*) continue ;; esac
+		seen_macs="${seen_macs}${mac}|"
+		interface_match=""
+		device=""
+		if [ -n "$interface" ]; then
+			network_get_device device "$interface"
+			[ -z "$device" ] && device=$(ubus call "network.interface.${interface}" status 2>/dev/null | jsonfilter -e '@.device' 2>/dev/null)
+			[ -z "$device" ] && [ -d "/sys/class/net/$interface" ] && device="$interface"
+			case "$device" in
+				*[!A-Za-z0-9_.:-]*|"") ;;
+				*) interface_match="-i ${device}" ;;
+			esac
+		fi
+		[ "$DEVICE_POLICY_VALID" = "0" ] && interface_match=""
+
+		$ipt_m -A PSW_DEVICE_GUARD $interface_match -m mac --mac-source "$mac" -s 0.0.0.0 -p udp --sport 68 --dport 67 -j RETURN
+		if [ "$DEVICE_POLICY_VALID" = "0" ]; then
+			$ipt_m -A PSW_DEVICE_GUARD $interface_match -m mac --mac-source "$mac" -j DROP
+			$ip6t_f -I INPUT $interface_match -m mac --mac-source "$mac" $(comment "PSW_REJECT_IPV6") -j REJECT --reject-with icmp6-adm-prohibited
+			$ip6t_f -I FORWARD $interface_match -m mac --mac-source "$mac" $(comment "PSW_REJECT_IPV6") -j REJECT --reject-with icmp6-adm-prohibited
+			has_ipv4_rules=1
+			continue
+		fi
+		echo "$ip" | awk -F. 'NF == 4 { for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]+$/ || $i > 255) exit 1; exit 0 } { exit 1 }' || continue
+		case "$seen_ips" in *"|${ip}|"*) continue ;; esac
+		seen_ips="${seen_ips}${ip}|"
+		$ipt_m -A PSW_DEVICE_GUARD $interface_match -m mac --mac-source "$mac" ! -s "$ip" -j DROP
+		$ipt_m -A PSW_DEVICE_GUARD $interface_match -s "$ip" -m mac ! --mac-source "$mac" -j DROP
+		$ip6t_f -I INPUT $interface_match -m mac --mac-source "$mac" $(comment "PSW_REJECT_IPV6") -j REJECT --reject-with icmp6-adm-prohibited
+		$ip6t_f -I FORWARD $interface_match -m mac --mac-source "$mac" $(comment "PSW_REJECT_IPV6") -j REJECT --reject-with icmp6-adm-prohibited
+		has_ipv4_rules=1
+	done
+
+	if [ "$has_ipv4_rules" = "1" ]; then
+		$ipt_m -I PREROUTING 1 $(comment "PSW_DEVICE_GUARD") -j PSW_DEVICE_GUARD
+	else
+		$ipt_m -X PSW_DEVICE_GUARD 2>/dev/null
+	fi
+	if [ "$has_ipv4_rules" = "1" ] || [ "$REJECT_IPV6" = "1" ]; then
+		echolog "  - 已加载设备 IP/MAC 强绑定与 IPv6 拒绝规则。"
+	fi
+}
+
+load_openvpn() {
+	local base="${TMP_PATH}/openvpn/nodes"
+	[ -d "$base" ] || return 0
+	$ipt_n -N PSW_OPENVPN 2>/dev/null
+	$ipt_n -F PSW_OPENVPN
+	$ipt_f -N PSW_OPENVPN_INPUT 2>/dev/null
+	$ipt_f -F PSW_OPENVPN_INPUT
+	$ipt_f -N PSW_OPENVPN 2>/dev/null
+	$ipt_f -F PSW_OPENVPN
+	local has_rules=0 has_input_rules=0 dir dev dns ip allow_lan sid lan_device
+	for dir in "$base"/*; do
+		[ -d "$dir" ] || continue
+		dev=$(cat "$dir/dev" 2>/dev/null)
+		dns=$(cat "$dir/dns" 2>/dev/null)
+		case "$dev" in ""|*[!A-Za-z0-9_.-]*) continue ;; esac
+		echo "$dns" | awk -F. 'NF == 4 { for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]+$/ || $i > 255) exit 1; exit 0 } { exit 1 }' || continue
+		while IFS='|' read -r ip allow_lan sid; do
+			echo "$ip" | awk -F. 'NF == 4 { for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]+$/ || $i > 255) exit 1; exit 0 } { exit 1 }' || continue
+			$ipt_n -I PSW 1 $(comment "PSW_OPENVPN_${sid}") -s "$ip" -j RETURN
+			$ipt_m -I PSW 1 $(comment "PSW_OPENVPN_${sid}") -s "$ip" -j RETURN
+			$ipt_n -I PREROUTING 1 $(comment "PSW_OPENVPN_DNS_${sid}") -s "$ip" -p udp --dport 53 -j DNAT --to-destination "$dns"
+			$ipt_n -I PREROUTING 1 $(comment "PSW_OPENVPN_DNS_${sid}") -s "$ip" -p tcp --dport 53 -j DNAT --to-destination "$dns"
+			$ipt_n -A PSW_OPENVPN $(comment "PSW_OPENVPN_${sid}") -s "$ip" -o "$dev" -j MASQUERADE
+			if [ "$allow_lan" != "1" ]; then
+				$ipt_f -A PSW_OPENVPN_INPUT $(comment "PSW_OPENVPN_DHCP_${sid}") -s "$ip" -p udp --sport 68 --dport 67 -j RETURN
+				$ipt_f -A PSW_OPENVPN_INPUT $(comment "PSW_OPENVPN_INPUT_KILLSWITCH_${sid}") -s "$ip" -j REJECT --reject-with icmp-admin-prohibited
+				has_input_rules=1
+			fi
+			$ipt_f -A PSW_OPENVPN $(comment "PSW_OPENVPN_${sid}") -d "$ip" -i "$dev" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+			if [ "$allow_lan" = "1" ]; then
+				for lan_device in $(get_firewall_zone_devices $IPV6_REJECT_ZONES); do
+					$ipt_f -A PSW_OPENVPN $(comment "PSW_OPENVPN_LAN_${sid}") -s "$ip" -o "$lan_device" -j ACCEPT
+				done
+			fi
+			$ipt_f -A PSW_OPENVPN $(comment "PSW_OPENVPN_${sid}") -s "$ip" -o "$dev" -j ACCEPT
+			$ipt_f -A PSW_OPENVPN $(comment "PSW_OPENVPN_KILLSWITCH_${sid}") -s "$ip" -j REJECT --reject-with icmp-admin-prohibited
+			has_rules=1
+		done < "$dir/sources"
+	done
+	if [ "$has_rules" = "1" ]; then
+		$ipt_n -I POSTROUTING 1 $(comment "PSW_OPENVPN") -j PSW_OPENVPN
+		[ "$has_input_rules" = "1" ] && $ipt_f -I INPUT 1 $(comment "PSW_OPENVPN") -j PSW_OPENVPN_INPUT
+		$ipt_f -I FORWARD 1 $(comment "PSW_OPENVPN") -j PSW_OPENVPN
+		echolog "  - 已加载 OpenVPN 设备全流量、DNS、NAT 与防回落规则。"
+	else
+		$ipt_n -X PSW_OPENVPN 2>/dev/null
+		$ipt_f -X PSW_OPENVPN_INPUT 2>/dev/null
+		$ipt_f -X PSW_OPENVPN 2>/dev/null
+	fi
+}
+
 load_acl() {
 	{ [ "$ENABLED_ACLS" = "1" ] || { [ "$ENABLED_DEFAULT_ACL" = "1" ] && [ "$CLIENT_PROXY" = "1" ]; }; } && echolog "  - 访问控制："
 	[ "$ENABLED_ACLS" = 1 ] && {
 		acl_app
+		load_openvpn
 		for sid in $(ls -F ${TMP_ACL_PATH} | grep '/$' | awk -F '/' '{print $1}' | grep -v 'default'); do
 			eval "$(uci -q show "${CONFIG}.${sid}" | cut -d'.' -sf 3-)"
+			if [ "$(get_cache_var "ACL_${sid}_openvpn")" = "1" ]; then
+				unset enabled sid remarks sources interface node source_list mode use_global_config tcp_no_redir_ports udp_no_redir_ports tcp_proxy_drop_ports udp_proxy_drop_ports tcp_redir_ports udp_redir_ports
+				continue
+			fi
 
 			mode=${mode:-0}
 			tcp_no_redir_ports=${tcp_no_redir_ports:-default}
@@ -1380,6 +1502,7 @@ add_firewall_rule() {
 	}
 
 	#  加载ACLS
+	load_device_guard
 	load_acl
 
 	[ -d "${TMP_IFACE_PATH}" ] && {
@@ -1405,11 +1528,27 @@ del_firewall_rule() {
 				$ipt -D $chain $index 2>/dev/null
 			done
 		done
-		for chain in "PSW" "PSW_OUTPUT" "PSW_DIVERT" "PSW_DNS" "PSW_RULE"; do
+		for chain in "PSW" "PSW_OUTPUT" "PSW_DIVERT" "PSW_DNS" "PSW_RULE" "PSW_DEVICE_GUARD"; do
 			$ipt -F $chain 2>/dev/null
 			$ipt -X $chain 2>/dev/null
 		done
 	done
+	for i in $(seq 1 $($ipt_n -nL POSTROUTING | grep -c PSW_OPENVPN)); do
+		index=$($ipt_n --line-number -nL POSTROUTING | grep PSW_OPENVPN | head -1 | awk '{print $1}')
+		$ipt_n -D POSTROUTING "$index" 2>/dev/null
+	done
+	for chain in INPUT FORWARD; do
+		for i in $(seq 1 $($ipt_f -nL "$chain" | grep -c PSW_OPENVPN)); do
+			index=$($ipt_f --line-number -nL "$chain" | grep PSW_OPENVPN | head -1 | awk '{print $1}')
+			$ipt_f -D "$chain" "$index" 2>/dev/null
+		done
+	done
+	$ipt_n -F PSW_OPENVPN 2>/dev/null
+	$ipt_n -X PSW_OPENVPN 2>/dev/null
+	$ipt_f -F PSW_OPENVPN_INPUT 2>/dev/null
+	$ipt_f -X PSW_OPENVPN_INPUT 2>/dev/null
+	$ipt_f -F PSW_OPENVPN 2>/dev/null
+	$ipt_f -X PSW_OPENVPN 2>/dev/null
 	for ipt in "$ipt_f" "$ip6t_f"; do
 		for chain in "FORWARD" "INPUT" "OUTPUT"; do
 			for i in $(seq 1 $($ipt -nL $chain | grep -c PSW_REJECT)); do
@@ -1481,6 +1620,7 @@ gen_include() {
 			mangle_output_psw=\$(${ipt}-save -t mangle | grep "PSW" | grep "mangle\-OUTPUT\-PSW" | sed "s#-A OUTPUT ##g")
 			$ipt-save -c | grep -v "PSW" | $ipt-restore -c
 			$ipt-restore -n <<-EOT
+			$(extract_rules 4 filter)
 			$(extract_rules 4 nat)
 			$(extract_rules 4 mangle)
 			EOT
@@ -1503,6 +1643,7 @@ gen_include() {
 			mangle_output_psw=\$(${ip6t}-save -t mangle | grep "PSW" | grep "mangle\-OUTPUT\-PSW" | sed "s#-A OUTPUT ##g")
 			$ip6t-save -c | grep -v "PSW" | $ip6t-restore -c
 			$ip6t-restore -n <<-EOT
+			$(extract_rules 6 filter)
 			$(extract_rules 6 nat)
 			$(extract_rules 6 mangle)
 			EOT
@@ -1537,7 +1678,7 @@ get_ip6t_bin() {
 }
 
 start() {
-	[ "$ENABLED_DEFAULT_ACL" = 0 ] && [ "$ENABLED_ACLS" = 0 ] && return
+	[ "$ENABLED_DEFAULT_ACL" = 0 ] && [ "$ENABLED_ACLS" = 0 ] && [ "$REJECT_IPV6" != 1 ] && return
 	add_firewall_rule
 	gen_include
 }

@@ -114,13 +114,15 @@ o.write = function(self, section, value)
 	return DynamicList.write(self, section, t)
 end
 for i, v in pairs(nodes_table) do
-	if v.protocol ~= "_shunt" then
-		o:value(v.id, v.remark)
-		o.group[#o.group+1] = (v.group and v.group ~= "") and v.group or translate("default")
-		s.fields["enable_autoswitch"]:depends({ node = v.id })
+	if v.node_type ~= "openvpn" then
+		if v.protocol ~= "_shunt" then
+			o:value(v.id, v.remark)
+			o.group[#o.group+1] = (v.group and v.group ~= "") and v.group or translate("default")
+			s.fields["enable_autoswitch"]:depends({ node = v.id })
+		end
+		socks_node:value(v.id, v["remark"])
+		socks_node.group[#socks_node.group+1] = (v.group and v.group ~= "") and v.group or translate("default")
 	end
-	socks_node:value(v.id, v["remark"])
-	socks_node.group[#socks_node.group+1] = (v.group and v.group ~= "") and v.group or translate("default")
 end
 
 o = s:option(MultiValue, "backup_node_group", translate("Select Group"))

@@ -15,7 +15,9 @@ m:appendTemplate("/cbi/nodes_listvalue_com")
 
 local nodes_table = {}
 for _, e in ipairs(api.get_valid_nodes()) do
-	nodes_table[#nodes_table + 1] = e
+	if e.node_type ~= "openvpn" then
+		nodes_table[#nodes_table + 1] = e
+	end
 end
 
 local normal_list = {}

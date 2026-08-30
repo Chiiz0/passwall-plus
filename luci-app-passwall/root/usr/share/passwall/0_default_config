@@ -21,6 +21,8 @@ config global
 	option localhost_proxy '1'
 	option client_proxy '1'
 	option acl_enable '0'
+	option reject_ipv6 '1'
+	list ipv6_reject_zones 'lan'
 	option log_node '0'
 	option loglevel 'error'
 	option log_chinadns_ng '0'

@@ -570,7 +570,15 @@ function get_valid_nodes()
 		if e.type and e.remarks then
 			local type_name = e.type
 			if e.type == "sing-box" then type_name = "Sing-Box" end
-			if e.protocol and (e.protocol == "_balancing" or e.protocol == "_shunt" or e.protocol == "_iface" or e.protocol == "_urltest") then
+			if e.type == "OpenVPN" and e.config and trim(e.config) ~= "" then
+				e["remark"] = trim("%s：[%s]" % {type_name, e.remarks})
+				e["node_type"] = "openvpn"
+				if not e.group or e.group == "" then
+					default_nodes[#default_nodes + 1] = e
+				else
+					other_nodes[#other_nodes + 1] = e
+				end
+			elseif e.protocol and (e.protocol == "_balancing" or e.protocol == "_shunt" or e.protocol == "_iface" or e.protocol == "_urltest") then
 				e["remark"] = trim("%s：[%s]" % {type_name .. " " .. i18n.translatef(e.protocol), e.remarks})
 				e["node_type"] = "special"
 				if not e.group or e.group == "" then
@@ -581,7 +589,7 @@ function get_valid_nodes()
 			end
 			local port = e.port or e.hysteria_hop or e.hysteria2_hop
 			local is_realm = (e.type == "Hysteria2" or e.protocol == 'hysteria2') and e.hysteria2_realms or nil
-			if (port and e.address) or is_realm then
+			if e.type ~= "OpenVPN" and ((port and e.address) or is_realm) then
 				local address = e.address
 				if is_ip(address) or datatypes.hostname(address) or is_realm then
 					if (e.type == "sing-box" or e.type == "Xray") and e.protocol then

@@ -222,6 +222,67 @@ insert_nftset() {
 	fi
 }
 
+load_device_guard() {
+	nft "add chain $NFTABLE_NAME PSW_DEVICE_GUARD"
+	nft "flush chain $NFTABLE_NAME PSW_DEVICE_GUARD"
+	local has_rules=0
+
+	if [ "$REJECT_IPV6" = "1" ]; then
+		local zone_device
+		for zone_device in $(get_firewall_zone_devices $IPV6_REJECT_ZONES); do
+			nft "add rule $NFTABLE_NAME PSW_DEVICE_GUARD iifname \"${zone_device}\" meta nfproto ipv6 counter reject with icmpv6 type admin-prohibited comment \"Reject LAN IPv6\""
+			has_rules=1
+		done
+	fi
+
+	local sid mac ip interface device interface_match
+	local seen_macs="|" seen_ips="|"
+	local binding_sections=$(uci show ${CONFIG} | grep "=acl_rule" | cut -d '.' -sf 2 | cut -d '=' -sf 1)
+	for sid in $binding_sections; do
+		[ "$(config_n_get "$sid" enabled 0)" = "1" ] || continue
+		[ "$(config_n_get "$sid" bind_enable 0)" = "1" ] || continue
+		mac=$(config_n_get "$sid" bind_mac | tr 'a-f' 'A-F')
+		ip=$(config_n_get "$sid" bind_ip)
+		interface=$(config_n_get "$sid" interface)
+		echo "$mac" | grep -qE '^([0-9A-F]{2}:){5}[0-9A-F]{2}$' || continue
+		case "$seen_macs" in *"|${mac}|"*) continue ;; esac
+		seen_macs="${seen_macs}${mac}|"
+		interface_match=""
+		device=""
+		if [ -n "$interface" ]; then
+			network_get_device device "$interface"
+			[ -z "$device" ] && device=$(ubus call "network.interface.${interface}" status 2>/dev/null | jsonfilter -e '@.device' 2>/dev/null)
+			[ -z "$device" ] && [ -d "/sys/class/net/$interface" ] && device="$interface"
+			case "$device" in
+				*[!A-Za-z0-9_.:-]*|"") ;;
+				*) interface_match="iifname \"${device}\"" ;;
+			esac
+		fi
+		[ "$DEVICE_POLICY_VALID" = "0" ] && interface_match=""
+
+		nft "add rule $NFTABLE_NAME PSW_DEVICE_GUARD ${interface_match} ether saddr ${mac} meta nfproto ipv6 counter reject with icmpv6 type admin-prohibited comment \"${sid} IPv6\""
+		nft "add rule $NFTABLE_NAME PSW_DEVICE_GUARD ${interface_match} ether saddr ${mac} ip saddr 0.0.0.0 udp sport 68 udp dport 67 counter return comment \"${sid} DHCP\""
+		if [ "$DEVICE_POLICY_VALID" = "0" ]; then
+			nft "add rule $NFTABLE_NAME PSW_DEVICE_GUARD ${interface_match} ether saddr ${mac} meta nfproto ipv4 counter drop comment \"${sid} invalid binding\""
+			has_rules=1
+			continue
+		fi
+		echo "$ip" | awk -F. 'NF == 4 { for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]+$/ || $i > 255) exit 1; exit 0 } { exit 1 }' || continue
+		case "$seen_ips" in *"|${ip}|"*) continue ;; esac
+		seen_ips="${seen_ips}${ip}|"
+		nft "add rule $NFTABLE_NAME PSW_DEVICE_GUARD ${interface_match} ether saddr ${mac} ip saddr != ${ip} counter drop comment \"${sid} MAC mismatch\""
+		nft "add rule $NFTABLE_NAME PSW_DEVICE_GUARD ${interface_match} ip saddr ${ip} ether saddr != ${mac} counter drop comment \"${sid} IP mismatch\""
+		has_rules=1
+	done
+
+	if [ "$has_rules" = "1" ]; then
+		nft "insert rule $NFTABLE_NAME mangle_prerouting counter jump PSW_DEVICE_GUARD comment \"PSW_DEVICE_GUARD\""
+		echolog "  - 已加载设备 IP/MAC 强绑定与 IPv6 拒绝规则。"
+	else
+		nft "delete chain $NFTABLE_NAME PSW_DEVICE_GUARD" 2>/dev/null
+	fi
+}
+
 gen_nftset() {
 	local nftset_name="${1}"; shift
 	local ip_type="${1}"; shift
@@ -256,12 +317,103 @@ get_jump_nft() {
 	esac
 }
 
+clear_openvpn_fw4() {
+	local handle
+	for handle in $(nft -a list chain inet fw4 forward 2>/dev/null | grep 'PSW_OPENVPN' | awk -F '# handle ' '{print $2}'); do
+		nft delete rule inet fw4 forward handle "$handle" 2>/dev/null
+	done
+}
+
+restore_openvpn_fw4() {
+	[ -z "$(command -v config_n_get)" ] && . "$UTILS_PATH"
+	clear_openvpn_fw4
+	nft list chain inet fw4 forward >/dev/null 2>&1 || return 0
+	local base="${TMP_PATH}/openvpn/nodes"
+	local dir dev ip allow_lan sid lan_device
+	[ -d "$base" ] || return 0
+	for dir in "$base"/*; do
+		[ -d "$dir" ] || continue
+		dev=$(cat "$dir/dev" 2>/dev/null)
+		case "$dev" in ""|*[!A-Za-z0-9_.-]*) continue ;; esac
+		while IFS='|' read -r ip allow_lan sid; do
+			echo "$ip" | awk -F. 'NF == 4 { for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]+$/ || $i > 255) exit 1; exit 0 } { exit 1 }' || continue
+			nft "insert rule inet fw4 forward ip daddr $ip iifname \"$dev\" ct state established,related counter accept comment \"PSW_OPENVPN_${sid}\""
+			if [ "$allow_lan" = "1" ]; then
+				for lan_device in $(get_firewall_zone_devices $(config_n_get @global[0] ipv6_reject_zones lan)); do
+					nft "insert rule inet fw4 forward ip saddr $ip oifname \"$lan_device\" counter accept comment \"PSW_OPENVPN_LAN_${sid}\""
+				done
+			fi
+			nft "insert rule inet fw4 forward ip saddr $ip oifname \"$dev\" counter accept comment \"PSW_OPENVPN_${sid}\""
+		done < "$dir/sources"
+	done
+}
+
+load_openvpn() {
+	local base="${TMP_PATH}/openvpn/nodes"
+	[ -d "$base" ] || return 0
+	nft "add chain $NFTABLE_NAME srcnat { type nat hook postrouting priority srcnat - 1; policy accept; }" 2>/dev/null
+	nft "add chain $NFTABLE_NAME input { type filter hook input priority filter - 1; policy accept; }" 2>/dev/null
+	nft "add chain $NFTABLE_NAME forward { type filter hook forward priority filter - 1; policy accept; }" 2>/dev/null
+	nft "add chain $NFTABLE_NAME PSW_OPENVPN_NAT" 2>/dev/null
+	nft "flush chain $NFTABLE_NAME PSW_OPENVPN_NAT"
+	nft "add chain $NFTABLE_NAME PSW_OPENVPN_INPUT" 2>/dev/null
+	nft "flush chain $NFTABLE_NAME PSW_OPENVPN_INPUT"
+	nft "add chain $NFTABLE_NAME PSW_OPENVPN_FWD" 2>/dev/null
+	nft "flush chain $NFTABLE_NAME PSW_OPENVPN_FWD"
+	local has_rules=0 has_input_rules=0 dir dev dns ip allow_lan sid lan_device
+	for dir in "$base"/*; do
+		[ -d "$dir" ] || continue
+		dev=$(cat "$dir/dev" 2>/dev/null)
+		dns=$(cat "$dir/dns" 2>/dev/null)
+		case "$dev" in ""|*[!A-Za-z0-9_.-]*) continue ;; esac
+		echo "$dns" | awk -F. 'NF == 4 { for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]+$/ || $i > 255) exit 1; exit 0 } { exit 1 }' || continue
+		while IFS='|' read -r ip allow_lan sid; do
+			echo "$ip" | awk -F. 'NF == 4 { for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]+$/ || $i > 255) exit 1; exit 0 } { exit 1 }' || continue
+			nft "insert rule $NFTABLE_NAME PSW_MANGLE ip saddr $ip counter return comment \"PSW_OPENVPN_${sid}\""
+			nft list chain $NFTABLE_NAME PSW_NAT >/dev/null 2>&1 && nft "insert rule $NFTABLE_NAME PSW_NAT ip saddr $ip counter return comment \"PSW_OPENVPN_${sid}\""
+			nft "insert rule $NFTABLE_NAME dstnat ip saddr $ip meta l4proto udp udp dport 53 counter dnat ip to $dns comment \"PSW_OPENVPN_DNS_${sid}\""
+			nft "insert rule $NFTABLE_NAME dstnat ip saddr $ip meta l4proto tcp tcp dport 53 counter dnat ip to $dns comment \"PSW_OPENVPN_DNS_${sid}\""
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_NAT ip saddr $ip oifname \"$dev\" counter masquerade comment \"PSW_OPENVPN_${sid}\""
+			if [ "$allow_lan" != "1" ]; then
+				nft "add rule $NFTABLE_NAME PSW_OPENVPN_INPUT ip saddr $ip udp sport 68 udp dport 67 counter return comment \"PSW_OPENVPN_DHCP_${sid}\""
+				nft "add rule $NFTABLE_NAME PSW_OPENVPN_INPUT ip saddr $ip counter reject comment \"PSW_OPENVPN_INPUT_KILLSWITCH_${sid}\""
+				has_input_rules=1
+			fi
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_FWD ip daddr $ip iifname \"$dev\" ct state established,related counter accept comment \"PSW_OPENVPN_${sid}\""
+			if [ "$allow_lan" = "1" ]; then
+				for lan_device in $(get_firewall_zone_devices $IPV6_REJECT_ZONES); do
+					nft "add rule $NFTABLE_NAME PSW_OPENVPN_FWD ip saddr $ip oifname \"$lan_device\" counter accept comment \"PSW_OPENVPN_LAN_${sid}\""
+				done
+			fi
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_FWD ip saddr $ip oifname \"$dev\" counter accept comment \"PSW_OPENVPN_${sid}\""
+			nft "add rule $NFTABLE_NAME PSW_OPENVPN_FWD ip saddr $ip counter reject comment \"PSW_OPENVPN_KILLSWITCH_${sid}\""
+			has_rules=1
+		done < "$dir/sources"
+	done
+	if [ "$has_rules" = "1" ]; then
+		nft "insert rule $NFTABLE_NAME srcnat counter jump PSW_OPENVPN_NAT comment \"PSW_OPENVPN\""
+		[ "$has_input_rules" = "1" ] && nft "insert rule $NFTABLE_NAME input counter jump PSW_OPENVPN_INPUT comment \"PSW_OPENVPN\""
+		nft "insert rule $NFTABLE_NAME forward counter jump PSW_OPENVPN_FWD comment \"PSW_OPENVPN\""
+		restore_openvpn_fw4
+		echolog "  - 已加载 OpenVPN 设备全流量、DNS、NAT 与防回落规则。"
+	else
+		nft "delete chain $NFTABLE_NAME PSW_OPENVPN_NAT" 2>/dev/null
+		nft "delete chain $NFTABLE_NAME PSW_OPENVPN_INPUT" 2>/dev/null
+		nft "delete chain $NFTABLE_NAME PSW_OPENVPN_FWD" 2>/dev/null
+	fi
+}
+
 load_acl() {
 	{ [ "$ENABLED_ACLS" = "1" ] || { [ "$ENABLED_DEFAULT_ACL" = "1" ] && [ "$CLIENT_PROXY" = "1" ]; }; } && echolog "  - 访问控制："
 	[ "$ENABLED_ACLS" = 1 ] && {
 		acl_app
+		load_openvpn
 		for sid in $(ls -F ${TMP_ACL_PATH} | grep '/$' | awk -F '/' '{print $1}' | grep -v 'default'); do
 			eval "$(uci -q show "${CONFIG}.${sid}" | cut -d'.' -sf 3-)"
+			if [ "$(get_cache_var "ACL_${sid}_openvpn")" = "1" ]; then
+				unset enabled sid remarks sources interface node source_list mode use_global_config tcp_no_redir_ports udp_no_redir_ports tcp_proxy_drop_ports udp_proxy_drop_ports tcp_redir_ports udp_redir_ports
+				continue
+			fi
 
 			mode=${mode:-0}
 			tcp_no_redir_ports=${tcp_no_redir_ports:-default}
@@ -1466,6 +1618,7 @@ add_firewall_rule() {
 	}
 
 	#  加载ACLS
+	load_device_guard
 	load_acl
 
 	[ -d "${TMP_IFACE_PATH}" ] && {
@@ -1481,7 +1634,8 @@ add_firewall_rule() {
 }
 
 del_firewall_rule() {
-	for nft in "dstnat" "srcnat" "nat_output" "mangle_prerouting" "mangle_output"; do
+	clear_openvpn_fw4
+	for nft in "dstnat" "srcnat" "input" "forward" "nat_output" "mangle_prerouting" "mangle_output"; do
         local handles=$(nft -a list chain $NFTABLE_NAME ${nft} 2>/dev/null | grep -E "PSW_" | awk -F '# handle ' '{print$2}')
 		for handle in $handles; do
 			nft delete rule $NFTABLE_NAME ${nft} handle ${handle} 2>/dev/null
@@ -1562,6 +1716,7 @@ gen_include() {
 		[ -z "\$(nft list chain $NFTABLE_NAME mangle_prerouting | grep PSW_DIVERT)" ] && nft -f ${nft_chain_file}
 
 		${MY_PATH} update_wan_sets
+		${MY_PATH} restore_openvpn_fw4
 	EOF
 	)
 
@@ -1574,7 +1729,7 @@ gen_include() {
 }
 
 start() {
-	[ "$ENABLED_DEFAULT_ACL" = 0 ] && [ "$ENABLED_ACLS" = 0 ] && return
+	[ "$ENABLED_DEFAULT_ACL" = 0 ] && [ "$ENABLED_ACLS" = 0 ] && [ "$REJECT_IPV6" != 1 ] && return
 	add_firewall_rule
 	gen_include
 }
@@ -1611,6 +1766,9 @@ mwan3_stop)
 	;;
 update_wan_sets)
 	update_wan_sets "$@"
+	;;
+restore_openvpn_fw4)
+	restore_openvpn_fw4
 	;;
 stop)
 	stop
