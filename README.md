@@ -15,9 +15,11 @@ PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/O
 | 接口 | 用途 | 默认配置 |
 | --- | --- | --- |
 | `eth0` | LAN | `10.0.0.1/24`，提供 DHCP |
-| `eth1` | WAN | DHCP，从 VMware NAT 获取地址 |
+| `eth1` | WAN | DHCP，从任意可用的 IPv4 DHCP 上联获取地址、网关和 DNS |
 
 IPv6 会从内核 sysctl、WAN/LAN 接口、RA/DHCPv6 和 PassWall 同时关闭，LAN 防火墙仍保留一条显式 IPv6 `REJECT` 规则。构建和 QEMU 验证方法见 [openwrt/README.md](openwrt/README.md)。固件不内置订阅、`.ovpn`、私钥或默认密码。
+
+可直接从 [GitHub Releases](https://github.com/Chiiz0/passwall-plus/releases) 下载固件。普通 BIOS 的 VMware 虚拟机选择 `generic-ext4-combined.vmdk`，UEFI 虚拟机选择 `generic-ext4-combined-efi.vmdk`；其他虚拟化平台或物理 x86/64 设备可使用对应的压缩 `.img.gz`。每个 Release 同时提供 `SHA256SUMS`。
 
 当前固件已用双 e1000 网卡实际启动验证：WAN DHCP、LuCI、OpenVPN/Xray/Sing-box、IPv6 禁用、`fw4 check` 和 `fw4 reload` 均通过，内核日志没有 nftables 段错误。由此绕开 Kwrt 的固件基线问题，而不是在 PassWall 中掩盖 `libnftables` 崩溃。
 

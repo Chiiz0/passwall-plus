@@ -52,13 +52,29 @@ use. The QEMU disk is a temporary copy, so the firmware artifact is not modified
 The currently generated 25.12.5 image passes this test without the
 `libnftables` segfault observed on the Kwrt snapshot.
 
+## GitHub releases
+
+The workflow always stores a 14-day GitHub Actions artifact. A tag matching
+`firmware-v*` also creates a permanent GitHub Release after the firmware passes
+the QEMU boot test, and uploads all images, manifests, build metadata, and
+`SHA256SUMS`. For example:
+
+```sh
+git tag -a firmware-v25.12.5-r1 -m "PassWall Plus OpenWrt 25.12.5 r1"
+git push origin firmware-v25.12.5-r1
+```
+
 ## VMware installation
 
 Use the `generic-ext4-combined.vmdk` image for legacy BIOS or
 `generic-ext4-combined-efi.vmdk` for UEFI. Attach two NICs in this order:
 
 1. LAN: host-only/custom network connected to the test client.
-2. WAN: VMware NAT, with DHCP enabled.
+2. WAN: any IPv4 uplink that provides DHCP, such as VMware NAT, a bridged
+   network, or an Ethernet network with an upstream DHCP router.
+
+The WAN setup is not VMware-specific: `eth1` is a normal DHCP client and uses
+the IPv4 address, default gateway, and DNS supplied by the upstream network.
 
 After boot, open `http://10.0.0.1/`, set the root password, then import
 proxy subscriptions and OpenVPN profiles through LuCI. Secrets must remain in
