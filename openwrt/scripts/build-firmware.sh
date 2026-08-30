@@ -88,7 +88,7 @@ printf 'src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-pa
 printf 'src-link passwall_plus %s\n' "${REPO_ROOT}" >> feeds.conf.passwall-plus
 mv feeds.conf.passwall-plus feeds.conf.default
 
-./scripts/feeds update packages luci passwall_packages passwall_plus
+./scripts/feeds update base packages luci passwall_packages passwall_plus
 ./scripts/feeds install -a -p passwall_packages
 ./scripts/feeds install -p packages openvpn
 ./scripts/feeds install -f -p passwall_plus luci-app-passwall
