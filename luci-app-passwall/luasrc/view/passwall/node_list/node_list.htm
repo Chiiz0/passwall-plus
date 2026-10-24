@@ -5,24 +5,26 @@ local appname = map.config
 local is_js_luci = api.is_js_luci()
 local section_tag = is_js_luci and "div" or "fieldset"
 
-local default_node_type = ""
 local shunt_rule_list = {}
 local node = map:get("@global[0]", "node")
 if node then
-	local node_type = map:get(node, "type")
 	local node_protocol = map:get(node, "protocol")
-	if (node_type == "Xray" or node_type == "sing-box") and node_protocol == "_shunt" then
-		default_node_type = node_protocol
+	if node_protocol == "_shunt" then
 		local node_shunt_group = map:get(node, "shunt_group")
 		map:foreach("shunt_rules", function(e)
 			if e[".name"] and e.remarks and e.group == node_shunt_group then
 				shunt_rule_list[#shunt_rule_list + 1] = e
 			end
 		end)
+		shunt_rule_list[#shunt_rule_list + 1] = {
+			[".name"] = "default_node",
+			remarks = translate("Default")
+		}
 	end
 end
 -%>
 <script src="<%=resource%>/view/<%=appname%>/Sortable.min.js?v=1.15.7"></script>
+<script src="<%=resource%>/view/<%=appname%>/node_list_sort.js"></script>
 
 <style>
 table th, .table .th {
@@ -384,6 +386,89 @@ table td, .table .td {
 	}
 </style>
 
+<style>
+	/* node list: click-to-sort headers and the per-group filter bar */
+	th[data-pw-sort] {
+		cursor: pointer;
+		user-select: none;
+		white-space: nowrap;
+	}
+
+	th[data-pw-sort]:hover {
+		text-decoration: underline;
+	}
+
+	.pw-sort-arrow {
+		display: inline-block;
+		min-width: 1em;
+		margin-left: 0.25em;
+		font-size: 90%;
+	}
+
+	.pw-sort-sub {
+		font-weight: normal;
+		font-size: 85%;
+		opacity: 0.85;
+		margin-left: 0.6em;
+		cursor: pointer;
+		text-decoration: underline dotted;
+		white-space: nowrap;
+	}
+
+	.pw-sort-sub.pw-sort-active {
+		opacity: 1;
+		font-weight: bold;
+	}
+
+	.pw-sort-note {
+		margin: 0.3em 0;
+		padding: 0.3em 0.6em;
+		border-radius: 3px;
+		background: rgba(251, 154, 5, 0.15);
+		font-size: 90%;
+	}
+
+	tr.pw-row-hidden {
+		display: none !important;
+	}
+
+	.pw-filter {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.3em 0.8em;
+		margin: 0.4em 0;
+		font-size: 90%;
+	}
+
+	.pw-filter label {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3em;
+		white-space: nowrap;
+	}
+
+	.pw-filter select,
+	.pw-filter input[type="search"],
+	.pw-filter .cbi-button {
+		width: auto !important;
+		min-width: 6em;
+		max-width: 22em;
+		height: auto;
+		padding: 0.15em 0.3em;
+		margin: 0;
+	}
+
+	.pw-filter .pw-filter-count {
+		opacity: 0.8;
+	}
+
+	.pw-filter.pw-filter-on .pw-filter-count {
+		font-weight: bold;
+		opacity: 1;
+	}
+</style>
+
 <script type="text/javascript">
 <% if is_js_luci then -%>
 	var cbi_t = [];
@@ -421,10 +506,10 @@ table td, .table .td {
 <%- else %>
 	(function() {
 		if (typeof(cbi_t_switch) === "function") {
-			var old_switch = cbi_t_switch;
+			const ori_cbi_t_switch = cbi_t_switch;
 			cbi_t_switch = function(section, tab) {
 				dechecked_all_node();
-				return old_switch(section, tab);
+				return ori_cbi_t_switch(section, tab);
 			};
 		}
 	})();
@@ -539,15 +624,29 @@ table td, .table .td {
 		}
 	}
 
+	function node_row_visible(el) {
+		if (window.pwNodeSort && typeof pwNodeSort.rowVisible === "function")
+			return pwNodeSort.rowVisible(el);
+		var row = el && el.closest ? el.closest("tr") : null;
+		return !row || !row.classList.contains("pw-row-hidden");
+	}
+
 	function set_select_all_state(sectionChecked) {
 		var visibleContainer = document.querySelector('#cbi-<%=appname%>-nodes > .cbi-tabcontainer[style*="display:block"], #cbi-<%=appname%>-nodes > .cbi-tabcontainer[style*="display: block"]');
 		if (!visibleContainer) return;
 		var nodes = visibleContainer.getElementsByClassName("nodes_select");
 		var selectAllChk = visibleContainer.querySelector(".nodes_select_all");
 		var selectAllBtn = document.getElementById("select_all_btn");
+		var visibleCount = 0;
 		for (var i = 0; i < nodes.length; i++) {
+			if (!node_row_visible(nodes[i])) {
+				nodes[i].checked = false;
+				continue;
+			}
 			nodes[i].checked = sectionChecked;
+			visibleCount++;
 		}
+		sectionChecked = sectionChecked && visibleCount > 0;
 		if (selectAllChk) {
 			selectAllChk.checked = sectionChecked;
 			selectAllChk.title = sectionChecked ? "<%:DeSelect all%>" : "<%:Select all%>";
@@ -575,10 +674,13 @@ table td, .table .td {
 		var selectAllChk = visibleContainer.querySelector(".nodes_select_all");
 		var selectAllBtn = document.getElementById("select_all_btn");
 		var checkedCount = 0;
+		var visibleCount = 0;
 		for (var i = 0; i < nodes.length; i++) {
+			if (!node_row_visible(nodes[i])) continue;
+			visibleCount++;
 			if (nodes[i].checked) checkedCount++;
 		}
-		var allChecked = checkedCount === nodes.length;
+		var allChecked = visibleCount > 0 && checkedCount === visibleCount;
 		var title = allChecked ? "<%:DeSelect all%>" : "<%:Select all%>";
 		var onclickFunc = allChecked ? "dechecked_all_node(this)" : "checked_all_node(this)";
 
@@ -601,7 +703,7 @@ table td, .table .td {
 		var doms = visibleContainer.getElementsByClassName("nodes_select");
 		if (doms && doms.length > 0) {
 			for (var i = 0 ; i < doms.length; i++) {
-				if (doms[i].checked) {
+				if (doms[i].checked && node_row_visible(doms[i])) {
 					ids.push(doms[i].getAttribute("cbid"))
 				}
 			}
@@ -709,6 +811,7 @@ table td, .table .td {
 	function urltest_node(cbi_id, dom) {
 		if (dom.dataset.busy == "1" || !cbi_id) return;
 		dom.dataset.busy = "1";
+		dom.title = "<%:HTTP request latency, for reference only%>";
 		dom.style.color = "";
 		dom.innerText = "<%:Check...%>";
 		XHR.get('<%=api.url("urltest_node")%>', {
@@ -719,7 +822,7 @@ table td, .table .td {
 				let text = "<%:Error%>";
 				if (x && x.status == 200) {
 					if (result.use_time == null || result.use_time.trim() == "") {
-						text = "<%:Timeout%>";
+						text = result.http_code >= 400 ? "HTTP " + result.http_code : "<%:Timeout%>";
 					} else {
 						let use_time = parseInt(result.use_time);
 						if (use_time < 1000)
@@ -727,6 +830,7 @@ table td, .table .td {
 						else if (use_time < 2000)
 							color = "#fb9a05";
 						text = use_time + " ms";
+						dom.title += "\n<%:Initial handshake time%>: " + result.handshake_time + " ms";
 					}
 				}
 				dom.innerText = text;
@@ -1110,7 +1214,7 @@ table td, .table .td {
 			const dom = document.getElementById('modal-mask');
 			dom.style.display = 'block';
 			dom.innerHTML = '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;"><%:Processing, please wait…%></div>';
-			
+
 			const chunkSize = 1000;  // Fragmented sending to overcome uhttpd's limitations, with each fragment containing 1000 characters.
 			const totalChunks = Math.ceil(link.length / chunkSize);
 			let currentChunk = 0;
@@ -1160,7 +1264,7 @@ table td, .table .td {
 			const doms = visibleContainer.getElementsByClassName("nodes_select");
 			if (doms && doms.length > 0) {
 				for (let i = 0 ; i < doms.length; i++) {
-					if (doms[i].checked) {
+					if (doms[i].checked && node_row_visible(doms[i])) {
 						ids.push(doms[i].getAttribute("cbid"))
 					}
 				}
@@ -1192,7 +1296,7 @@ table td, .table .td {
 			const doms = visibleContainer.getElementsByClassName("nodes_select");
 			if (doms && doms.length > 0) {
 				for (let i = 0 ; i < doms.length; i++) {
-					if (doms[i].checked) {
+					if (doms[i].checked && node_row_visible(doms[i])) {
 						ids.push(doms[i].getAttribute("cbid"))
 					}
 				}
@@ -1213,7 +1317,7 @@ table td, .table .td {
 			}
 		}
 	}
-	
+
 	const set_node_div = {
 		section: '',
 		open(cbi_id, protocol) {
@@ -1304,8 +1408,33 @@ table td, .table .td {
 <<%=section_tag%> class="cbi-section" id="node_list">
 </<%=section_tag%>>
 
+<div id="pw-nodesort-i18n" data-app="<%=appname%>" style="display:none">
+	<span data-k="hint"><%:Click to sort; click again to reverse. Press Save & Apply to keep the order.%></span>
+	<span data-k="typeHint"><%:Sort by type or protocol, then by name%></span>
+	<span data-k="addrHint"><%:Sort by server address and port%></span>
+	<span data-k="origHint"><%:Restore the saved order%></span>
+	<span data-k="changed"><%:The order changed on this page only. Press Save & Apply to store it on the router.%></span>
+	<span data-k="restored"><%:Saved order restored.%></span>
+	<span data-k="wait"><%:Automatic ping is still running (%d left). Sorting will run when it finishes.%></span>
+	<span data-k="waitFail"><%:Automatic ping did not finish within 2 minutes. Sorting was cancelled. Reload the page and try again.%></span>
+	<span data-k="filter"><%:Filter:%></span>
+	<span data-k="all"><%:All%></span>
+	<span data-k="empty"><%:(empty)%></span>
+	<span data-k="type"><%:Type%></span>
+	<span data-k="addr"><%:Address%></span>
+	<span data-k="fWord"><%:Word in remarks%></span>
+	<span data-k="search"><%:search...%></span>
+	<span data-k="searchHint"><%:Show only rows that contain this text%></span>
+	<span data-k="shown"><%:Shown %s of %t%></span>
+	<span data-k="reset"><%:Reset%></span>
+	<span data-k="resetHint"><%:Show all rows%></span>
+	<span data-k="filterHint"><%:The filter only hides rows on this page and changes nothing on the router. Select all skips hidden rows.%></span>
+</div>
+
 <script type="text/javascript">
 	//init logic
+	if (window.pwNodeSort)
+		pwNodeSort.init();
 
 	function get_remarks_name(o) {
 		let str = "";
@@ -1401,6 +1530,7 @@ table td, .table .td {
 					var node_tr_html = "";
 					for (var i = 0; i < group_nodes[group].length; i++) {
 						let o = group_nodes[group][i]
+						let _port = o["port"] || o["hysteria_hop"] || o["hysteria2_hop"];
 						var newDom = node_template.cloneNode(true);
 						newDom.classList.add("cbi-rowstyle-" + (i % 2 + 1));
 						var innerHTML = newDom.innerHTML;
@@ -1414,17 +1544,15 @@ table td, .table .td {
 						} else {
 							innerHTML = innerHTML.split("{{tcping}}").join('<span class="tcping_value" cbiid="{{id}}"><a href="javascript:void(0)" style="color:inherit">---</a></span>');
 						}
-						let is_realm = (o.type === "Hysteria2" || o.protocol === 'hysteria2') && o.hysteria2_realms || false;
-						if (o["protocol"] === '_shunt' || is_realm) {
-							innerHTML = innerHTML.split("{{url_test}}").join('<span class="ping" cbiid="{{id}}">---</span>');
+						if (o["address"] && _port) {
+							innerHTML = innerHTML.split("{{url_test}}").join('<span class="ping"><a href="javascript:void(0)" onclick="javascript:urltest_node(\'{{id}}\', this)" title="<%:HTTP request latency, for reference only%>"><%:Test%></a></span>');
 						} else {
-							innerHTML = innerHTML.split("{{url_test}}").join('<span class="ping"><a href="javascript:void(0)" onclick="javascript:urltest_node(\'{{id}}\', this)" title="<%:TLS handshake test, latency for reference only%>"><%:Test%></a></span>');
+							innerHTML = innerHTML.split("{{url_test}}").join('<span class="ping" cbiid="{{id}}">---</span>');
 						}
 						innerHTML = innerHTML.split("{{id}}").join(o[".name"]);
 						innerHTML = innerHTML.split("{{group}}").join(o["group"] || "");
 						let node_remarks = get_remarks_name(o);
 						if (show_node_info == "1") {
-							let _port = o["port"] || o["hysteria_hop"] || o["hysteria2_hop"];
 							if (_port) _port = _port.replace(/:/g, '-');
 							if (o["address"] && _port) {
 								let _address = o["address"]
@@ -1509,6 +1637,8 @@ table td, .table .td {
 			get_now_use_node();
 
 			pingAllNodes();
+			if (window.pwNodeSort)
+				pwNodeSort.enhanceAll();
 		});
 	}
 
@@ -1516,37 +1646,71 @@ table td, .table .td {
 
 	//Node list option saving logic
 	document.addEventListener("DOMContentLoaded", function () {
-		function onChange(option, value) {
+		function onChange(option, value, refresh) {
 			ajax.abortAll();
 			XHR.get('<%=api.url("save_node_list_opt")%>', {
 				option: option,
 				value: value
 			}, function(x) {
 				if (x && x.status == 200) {
-					document.getElementById("node_list").innerHTML = "";
-					loadNodeList();
+					if (refresh) {
+						document.getElementById("node_list").innerHTML = "";
+						loadNodeList();
+					}
 				} else {
 					alert("<%:Error%>");
 				}
 			});
 		}
 
-		waitForElement('input[type="checkbox"][name*="<%=appname%>"][name*="show_node_info"]', function(el) {
-			el.addEventListener("change", () => {
-				el.blur();
-				show_node_info = el.checked ? "1" : "0";
-				onChange("show_node_info", show_node_info);
+		function dom_event() {
+			waitForElement('input[type="checkbox"][name*="<%=appname%>"][name*="show_node_info"]', function(el) {
+				el.addEventListener("change", () => {
+					el.blur();
+					show_node_info = el.checked ? "1" : "0";
+					onChange("auto_detection_time", auto_detection_time, true);
+				});
 			});
-		});
 
-		waitForElement('select[name*="<%=appname%>"][name*="auto_detection_time"]', function(el) {
-			el.addEventListener("change", () => {
-				el.blur();
-				auto_detection_time = el.value;
-				onChange("auto_detection_time", auto_detection_time);
-			});
-		});
-		
+			<% if api.is_js_luci() then -%>
+				waitForElement('div[id*="cbid.<%=appname%>"][id*="url_test_url"]', function(el) {
+					el.addEventListener("cbi-dropdown-change", () => {
+						if (el.value && (!el.new_val || el.new_val != el.value)) {
+							onChange("url_test_url", el.value, false);
+							el.new_val = el.value;
+						}
+					});
+				});
+			<% else -%>
+				waitForElement('select[id*="<%=appname%>"][id*="url_test_url"]', function(el) {
+					el.addEventListener("change", () => {
+						if (el.value && (!el.new_val || el.new_val != el.value)) {
+							onChange("url_test_url", el.value, false);
+							el.new_val = el.value;
+						}
+					});
+				});
+
+				waitForElement('input[id*="<%=appname%>"][id*="url_test_url"]', function(el) {
+					el.addEventListener("change", () => {
+						if (el.value && (!el.new_val || el.new_val != el.value)) {
+							onChange("url_test_url", el.value, false);
+							el.new_val = el.value;
+						}
+					});
+				});
+			<% end -%>
+		}
+
+		<% if not api.is_js_luci() then -%>
+			const ori_cbi_d_update = cbi_d_update;
+			cbi_d_update = function() {
+				ori_cbi_d_update();
+				dom_event();
+			};
+		<% end -%>
+		dom_event();
+
 		const links = document.querySelectorAll('a');
 		links.forEach(link => {
 			link.addEventListener('click', (e) => {
@@ -1637,14 +1801,13 @@ table td, .table .td {
 					<input class="btn cbi-button" type="button" onclick="set_node_div.set('@global[0]', 'node')" value="<%:OK%>" />
 				</div>
 			</div>
-			<% if default_node_type == "_shunt" then %>
+			<% if #shunt_rule_list > 0 then %>
 			<div id="set_node_shunt_div" style="margin: 0.5em 0; padding: 0.5em; background: #f7f7f7; border-radius: 4px;">
 				<div class="cbi-section-descr" style="text-align: left;"><a style="color:#FF8C00"><%:Set as the routing rule node:%></a></div>
 				<div>
 				<% for i, v in ipairs(shunt_rule_list) do %>
 					<input class="btn cbi-button" type="button" onclick="set_node_div.set('<%=node%>', '<%=v[".name"]%>')" value="<%=v.remarks%>" />
 				<% end %>
-					<input class="btn cbi-button" type="button" onclick="set_node_div.set('<%=node%>', 'default_node')" value="<%:Default%>" />
 				</div>
 			</div>
 			<% end %>

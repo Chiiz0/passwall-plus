@@ -7,14 +7,15 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-passwall
-PKG_VERSION:=26.8.26
-PKG_RELEASE:=6
+PKG_VERSION:=26.10.22
+PKG_RELEASE:=3
 PKG_PO_VERSION:=$(PKG_VERSION)
 
 PKG_CONFIG_DEPENDS:= \
 	CONFIG_PACKAGE_$(PKG_NAME)_Iptables_Transparent_Proxy \
 	CONFIG_PACKAGE_$(PKG_NAME)_Nftables_Transparent_Proxy \
 	CONFIG_PACKAGE_$(PKG_NAME)_INCLUDE_Geoview \
+	CONFIG_PACKAGE_$(PKG_NAME)_INCLUDE_SmartDNS \
 	CONFIG_PACKAGE_$(PKG_NAME)_INCLUDE_Haproxy \
 	CONFIG_PACKAGE_$(PKG_NAME)_INCLUDE_Hysteria \
 	CONFIG_PACKAGE_$(PKG_NAME)_INCLUDE_NaiveProxy \
@@ -49,6 +50,7 @@ config PACKAGE_$(PKG_NAME)_Iptables_Transparent_Proxy
 	select PACKAGE_iptables
 	select PACKAGE_iptables-zz-legacy
 	select PACKAGE_iptables-mod-conntrack-extra
+	select PACKAGE_iptables-mod-extra
 	select PACKAGE_iptables-mod-iprange
 	select PACKAGE_iptables-mod-socket
 	select PACKAGE_iptables-mod-tproxy
@@ -69,6 +71,11 @@ config PACKAGE_$(PKG_NAME)_Nftables_Transparent_Proxy
 config PACKAGE_$(PKG_NAME)_INCLUDE_Geoview
 	bool "Include Geoview"
 	select PACKAGE_geoview
+	default y if aarch64||arm||i386||x86_64
+
+config PACKAGE_$(PKG_NAME)_INCLUDE_SmartDNS
+	bool "Include SmartDNS"
+	select PACKAGE_smartdns
 	default y if aarch64||arm||i386||x86_64
 
 config PACKAGE_$(PKG_NAME)_INCLUDE_Haproxy
@@ -160,15 +167,14 @@ endef
 define Package/$(PKG_NAME)/conffiles
 /etc/config/passwall
 /etc/config/passwall_server
-/usr/share/passwall/rules/direct_host
-/usr/share/passwall/rules/direct_ip
-/usr/share/passwall/rules/proxy_host
-/usr/share/passwall/rules/proxy_ip
-/usr/share/passwall/rules/block_host
-/usr/share/passwall/rules/block_ip
-/usr/share/passwall/rules/lanlist_ipv4
-/usr/share/passwall/rules/lanlist_ipv6
-/usr/share/passwall/rules/domains_excluded
+/etc/passwall/
+endef
+
+define Package/$(PKG_NAME)/postinst
+#!/bin/sh
+rm -f $${IPKG_INSTROOT}/usr/share/passwall/rules/*.nft
+rm -rf $${IPKG_INSTROOT}/tmp/etc/passwall_tmp
+exit 0
 endef
 
 define Package/$(PKG_NAME)/postrm
@@ -181,6 +187,7 @@ if [ -z "$${IPKG_INSTROOT}" ] && command -v uci >/dev/null 2>&1; then
 	uci -q commit dhcp
 	/etc/init.d/dnsmasq reload >/dev/null 2>&1
 fi
+rm -rf $${IPKG_INSTROOT}/tmp/etc/passwall_tmp
 exit 0
 endef
 

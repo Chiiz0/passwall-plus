@@ -36,6 +36,20 @@ uci commit firewall
 
 [ -n "$(uci -q get passwall.@global[0].reject_ipv6)" ] || uci -q set passwall.@global[0].reject_ipv6='1'
 [ -n "$(uci -q get passwall.@global[0].ipv6_reject_zones)" ] || uci -q add_list passwall.@global[0].ipv6_reject_zones='lan'
+mkdir -p /etc/passwall/rules
+for file in \
+	direct_host \
+	direct_ip \
+	proxy_host \
+	proxy_ip \
+	block_host \
+	block_ip \
+	lanlist_ipv4 \
+	lanlist_ipv6 \
+	domains_excluded
+do
+	[ -f "/etc/passwall/rules/$file" ] || cp "/usr/share/passwall/rules/$file" "/etc/passwall/rules/$file"
+done
 
 chmod +x /usr/share/passwall/*.sh
 

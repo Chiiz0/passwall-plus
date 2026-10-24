@@ -140,12 +140,12 @@ function gen_config(var)
 		tls = {
 			sni = node.tls_serverName,
 			insecure = (node.tls_allowInsecure == "1") and true or false,
-			pinSHA256 = (node.tls_pinSHA256) and node.tls_pinSHA256 or nil,
+			pinSHA256 = (node.tls_pinSHA256 and node.tls_pinSHA256 ~= "") and api.sha256_sb_xray(node.tls_pinSHA256) or nil,
 			ech = (node.ech == "1") and node.ech_config or nil
 		},
 		quic = {
-			initStreamReceiveWindow = (node.hysteria2_recv_window) and tonumber(node.hysteria2_recv_window) or nil,
-			initConnReceiveWindow = (node.hysteria2_recv_window_conn) and tonumber(node.hysteria2_recv_window_conn) or nil,
+			initStreamReceiveWindow = tonumber(node.hysteria2_stream_recv_win) and tonumber(node.hysteria2_stream_recv_win)*1048576 or nil,
+			initConnReceiveWindow = tonumber(node.hysteria2_conn_recv_win) and tonumber(node.hysteria2_conn_recv_win)*1048576 or nil,
 			maxIdleTimeout = (function(t)
 				t = tonumber(tostring(t or "30"):match("^%d+"))
 				return (t and t >= 4 and t <= 120) and t .. "s" or "30s"

@@ -36,6 +36,9 @@ All upstream archives are checked against the SHA-256 values in `versions.env`.
 The official SDK already pins every OpenWrt feed to the 25.12.5 release commit;
 the PassWall package feed is pinned separately. The local PassWall Plus checkout
 is linked into the SDK so the firmware always contains the source being built.
+Only the Go build tooling is backported from a separately pinned OpenWrt packages
+commit, with Go 1.27 selected for Xray 26.10. Target package feeds and the firmware
+kernel remain on the 25.12.5 baseline. Both pins are recorded in `build-info.txt`.
 
 ## Test
 
@@ -49,8 +52,18 @@ network mapping, WAN DHCP, IPv6 policy, installed binaries, LuCI, `fw4 check`,
 
 The test uses TCP port 2222 by default. Set `QEMU_SSH_PORT` if that port is in
 use. The QEMU disk is a temporary copy, so the firmware artifact is not modified.
-The currently generated 25.12.5 image passes this test without the
-`libnftables` segfault observed on the Kwrt snapshot.
+It also compiles the installed Lua sources, renders authenticated LuCI global,
+OpenVPN-node and ACL pages, verifies global OpenVPN supervision and fail-closed
+routing with an unreachable test server, and checks managed DHCP leases and
+IP/MAC guard creation and cleanup. These checks do not establish a successful
+VPN tunnel to an external server.
+
+The Plus self-updater's version selection and rejection of upstream package URLs
+can be tested separately with Python 3 and Lua 5.1:
+
+```sh
+python3 openwrt/tests/test-updater.py
+```
 
 ## GitHub releases
 
@@ -63,6 +76,12 @@ the QEMU boot test, and uploads all images, manifests, build metadata, and
 git tag -a firmware-v25.12.5-r1 -m "PassWall Plus OpenWrt 25.12.5 r1"
 git push origin firmware-v25.12.5-r1
 ```
+
+The release also includes the built `luci-app-passwall` and Simplified Chinese
+translation APKs. The LuCI self-updater reads this repository's release assets and
+compares the package version, independently of the OpenWrt firmware tag. These
+APKs target the dedicated 25.12 firmware; older opkg releases need their own SDK
+builds.
 
 ## VMware installation
 

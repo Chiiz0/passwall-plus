@@ -40,8 +40,8 @@ ip6t_m="$ip6t -t mangle -w"
 [ -z "$ip6t" ] || [ -z "$(lsmod | grep 'ip6table_nat')" ] && ip6t_n="eval #$ip6t_n"
 [ -z "$ip6t" ] || [ -z "$(lsmod | grep 'ip6table_mangle')" ] && ip6t_m="eval #$ip6t_m"
 FWI=$(uci -q get firewall.passwall.path 2>/dev/null)
-FAKE_IP="198.18.0.0/15"
-FAKE_IP_6="fc00::/18"
+FAKE_IP="198.18.0.0/16"
+FAKE_IP_6="2001:2::/48"
 
 USE_GEOVIEW=0
 EXCLUDE_VPSIP="^(0\.0\.0\.0|127\.0\.0\.1|1\.1\.1\.1|1\.1\.1\.2|8\.8\.8\.8|8\.8\.4\.4|9\.9\.9\.9)$"
@@ -431,6 +431,12 @@ load_acl() {
 			}
 			[ -n "$(get_cache_var "ACL_${sid}_dns_port")" ] && dns_redirect_port=$(get_cache_var "ACL_${sid}_dns_port")
 			[ -n "$(get_cache_var "ACL_${sid}_fakedns")" ] && use_fakedns=$(get_cache_var "ACL_${sid}_fakedns")
+
+			([ -n "$node" ] && ([ "$node" = "default" ] || [ "$node" = "$NODE" ])) && {
+				use_global_config=1
+				unset node
+			}
+
 			[ -n "$node" ] && {
 				if [ "$(config_get_type $node)" = "socks" ]; then
 					node_remark="Socks 配置($(config_n_get $node port) 端口)"
@@ -444,7 +450,7 @@ load_acl() {
 
 			[ "${use_global_config}" = "1" ] && {
 				if [ "$(config_get_type $NODE)" = "socks" ]; then
-					node_remark="Socks 配置($(config_n_get $NODE} port) 端口)"
+					node_remark="Socks 配置($(config_n_get "$NODE" port) 端口)"
 				else
 					node_remark=$(config_n_get $NODE remarks)
 				fi
@@ -520,7 +526,7 @@ load_acl() {
 					continue
 				fi
 				msg="【$remarks】，${msg}"
-				
+
 				ipt_tmp=$ipt_n
 				[ -n "${is_tproxy}" ] && ipt_tmp=$ipt_m
 
@@ -535,7 +541,7 @@ load_acl() {
 						echolog "     - ${msg}不代理所有 TCP 端口"
 					fi
 				}
-				
+
 				[ "$udp_no_redir_ports" != "disable" ] && {
 					if ! has_1_65535 "$udp_no_redir_ports"; then
 						[ "$_ipv4" != "1" ] && add_port_rules "$ip6t_m -A PSW $(comment "$remarks") ${_ipt_source} -p udp" $udp_no_redir_ports "-j RETURN" 2>/dev/null
@@ -547,7 +553,7 @@ load_acl() {
 						echolog "     - ${msg}不代理所有 UDP 端口"
 					fi
 				}
-				
+
 				local dns_redirect
 				[ $(config_n_get @global[0] dns_redirect "1") = "1" ] && dns_redirect=53
 				if ([ -n "$tcp_port" ] && [ -n "${tcp_proxy_mode}" ]) || ([ -n "$udp_port" ] && [ -n "${udp_proxy_mode}" ]); then
@@ -557,6 +563,8 @@ load_acl() {
 							black6_set_name="psw_${sid}_black6"
 							ipset -! create $black_set_name nethash maxelem 1048576 timeout 172800
 							ipset -! create $black6_set_name nethash family inet6 maxelem 1048576 timeout 172800
+							ipset save "$IPSET_BLACK" | awk -v set="$black_set_name" '$1 == "add" && $4 == "timeout" && $5 == "0" { print "add", set, $3, "timeout", 0 }' | ipset -! -R
+							ipset save "$IPSET_BLACK6" | awk -v set="$black6_set_name" '$1 == "add" && $4 == "timeout" && $5 == "0" { print "add", set, $3, "timeout", 0 }' | ipset -! -R
 						}
 					}
 					[ "${use_gfw_list}" = "1" ] && {
@@ -580,16 +588,16 @@ load_acl() {
 							local shunt_id
 							for shunt_id in $shunt_ids; do
 								[ "${shunt_group}" != "$(config_n_get ${shunt_id} group)" ] && continue
-								config_n_get $shunt_id ip_list | tr -s "\r\n" "\n" | grep -v "^#" | sed -e "/^$/d" | grep -E "(\.((2(5[0-5]|[0-4][0-9]))|[0-1]?[0-9]{1,2})){3}" | sed -e "s/^/add $shunt_set_name &/g" -e "s/$/ timeout 0/g" | ipset -! -R
-								config_n_get $shunt_id ip_list | tr -s "\r\n" "\n" | grep -v "^#" | sed -e "/^$/d" | grep -E "([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4}" | sed -e "s/^/add $shunt6_set_name &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+								config_n_get $shunt_id ip_list | tr -s "\r\n" "\n" | sed 's/#.*//' | grep -E "$IPv4_REGEX" | sed -e "s/^/add $shunt_set_name &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+								config_n_get $shunt_id ip_list | tr -s "\r\n" "\n" | sed 's/#.*//' | grep -E "$IPv6_REGEX" | sed -e "s/^/add $shunt6_set_name &/g" -e "s/$/ timeout 0/g" | ipset -! -R
 								[ "$USE_GEOVIEW" = "1" ] && {
 									local geoip_code=$(config_n_get $shunt_id ip_list | tr -s "\r\n" "\n" | sed -e "/^$/d" | grep -E "^geoip:" | grep -v "^geoip:private" | sed -E 's/^geoip:(.*)/\1/' | sed ':a;N;$!ba;s/\n/,/g')
 									[ -n "$geoip_code" ] && GEOIP_CODE="${GEOIP_CODE:+$GEOIP_CODE,}$geoip_code"
 								}
 							done
 							if [ -n "$GEOIP_CODE" ]; then
-								get_geoip $GEOIP_CODE ipv4 | grep -E "(\.((2(5[0-5]|[0-4][0-9]))|[0-1]?[0-9]{1,2})){3}" | sed -e "s/^/add $shunt_set_name &/g" -e "s/$/ timeout 0/g" | ipset -! -R
-								get_geoip $GEOIP_CODE ipv6 | grep -E "([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4}" | sed -e "s/^/add $shunt6_set_name &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+								get_geoip $GEOIP_CODE ipv4 | sed -e "s/^/add $shunt_set_name &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+								get_geoip $GEOIP_CODE ipv6 | sed -e "s/^/add $shunt6_set_name &/g" -e "s/$/ timeout 0/g" | ipset -! -R
 							fi
 						}
 					}
@@ -597,16 +605,16 @@ load_acl() {
 				else
 					[ -n "${DIRECT_DNSMASQ_PORT}" ] && dns_redirect=${DIRECT_DNSMASQ_PORT}
 				fi
-				if [ -n "${dns_redirect}" ]; then
+				if [ -n "$dns_redirect" ]; then
 					$ipt_m -A PSW $(comment "$remarks") -p udp ${_ipt_source} --dport 53 -j RETURN
-					[ "$_ipv4" != "1" ] && $ip6t_m -A PSW $(comment "$remarks") -p udp ${_ipt_source} --dport 53 -j RETURN 2>/dev/null
+					$ip6t_m -A PSW $(comment "$remarks") -p udp ${_ipt_source} --dport 53 -j RETURN 2>/dev/null
 					$ipt_m -A PSW $(comment "$remarks") -p tcp ${_ipt_source} --dport 53 -j RETURN
-					[ "$_ipv4" != "1" ] && $ip6t_m -A PSW $(comment "$remarks") -p tcp ${_ipt_source} --dport 53 -j RETURN 2>/dev/null
+					$ip6t_m -A PSW $(comment "$remarks") -p tcp ${_ipt_source} --dport 53 -j RETURN 2>/dev/null
 					$ipt_n -A PSW_DNS $(comment "$remarks") -p udp ${_ipt_source} --dport 53 -j REDIRECT --to-ports ${dns_redirect}
-					[ "$_ipv4" != "1" ] && $ip6t_n -A PSW_DNS $(comment "$remarks") -p udp ${_ipt_source} --dport 53 -j REDIRECT --to-ports ${dns_redirect} 2>/dev/null
+					$ip6t_n -A PSW_DNS $(comment "$remarks") -p udp ${_ipt_source} --dport 53 -j REDIRECT --to-ports ${dns_redirect} 2>/dev/null
 					$ipt_n -A PSW_DNS $(comment "$remarks") -p tcp ${_ipt_source} --dport 53 -j REDIRECT --to-ports ${dns_redirect}
-					[ "$_ipv4" != "1" ] && $ip6t_n -A PSW_DNS $(comment "$remarks") -p tcp ${_ipt_source} --dport 53 -j REDIRECT --to-ports ${dns_redirect} 2>/dev/null
-					[ -z "$(get_cache_var "ACL_${sid}_default")" ] && echolog "     - ${msg}使用与全局配置不相同节点，已将DNS强制重定向到专用 DNS 服务器。"
+					$ip6t_n -A PSW_DNS $(comment "$remarks") -p tcp ${_ipt_source} --dport 53 -j REDIRECT --to-ports ${dns_redirect} 2>/dev/null
+					[ -z "$(get_cache_var "ACL_${sid}_default")" ] && echolog "     - ${msg}节点不同于全局配置，DNS 重定向到专用服务器[${dns_redirect}]"
 				fi
 
 				[ -n "$tcp_port" ] || [ -n "$udp_port" ] && {
@@ -658,7 +666,7 @@ load_acl() {
 						$ip6t_m -A PSW $(comment "$remarks") ${_ipt_source} -m mark --mark 88 -j ACCEPT 2>/dev/null
 					}
 				}
-				
+
 				[ -n "$tcp_port" ] && {
 					if [ -n "${tcp_proxy_mode}" ]; then
 						msg2="${msg}代理 TCP 使用节点[$node_remark]"
@@ -670,7 +678,7 @@ load_acl() {
 							msg2="${msg2}(REDIRECT:${tcp_port})"
 							ipt_j="$(REDIRECT $tcp_port)"
 						fi
-						
+
 						[ "$accept_icmp" = "1" ] && {
 							[ "${use_fakedns}" = "1" ] && $ipt_n -A PSW $(comment "$remarks") -p icmp ${_ipt_source} -d $FAKE_IP $(REDIRECT)
 							[ "${use_proxy_list}" = "1" ] && $ipt_n -A PSW $(comment "$remarks") -p icmp ${_ipt_source} $(dst $black_set_name) $(REDIRECT)
@@ -679,7 +687,7 @@ load_acl() {
 							[ "${use_shunt_node}" = "1" ] && $ipt_n -A PSW $(comment "$remarks") -p icmp ${_ipt_source} $(dst $shunt_set_name) $(REDIRECT)
 							[ "${tcp_proxy_mode}" != "disable" ] && $ipt_n -A PSW $(comment "$remarks") -p icmp ${_ipt_source} $(REDIRECT)
 						}
-						
+
 						[ "$accept_icmpv6" = "1" ] && [ "$PROXY_IPV6" = "1" ] && [ "$_ipv4" != "1" ] && {
 							[ "${use_fakedns}" = "1" ] && $ip6t_n -A PSW $(comment "$remarks") -p ipv6-icmp ${_ipt_source} -d $FAKE_IP_6 $(REDIRECT) 2>/dev/null
 							[ "${use_proxy_list}" = "1" ] && $ip6t_n -A PSW $(comment "$remarks") -p ipv6-icmp ${_ipt_source} $(dst $black6_set_name) $(REDIRECT) 2>/dev/null
@@ -752,6 +760,7 @@ load_acl() {
 	}
 	load_openvpn
 	
+
 	[ "$ENABLED_DEFAULT_ACL" = 1 ] && [ "$CLIENT_PROXY" = 1 ] && {
 		msg="【默认】，"
 		local ipt_tmp=$ipt_n
@@ -767,7 +776,7 @@ load_acl() {
 				echolog "     - ${msg}不代理所有 TCP 端口"
 			fi
 		}
-		
+
 		[ "$UDP_NO_REDIR_PORTS" != "disable" ] && {
 			add_port_rules "$ip6t_m -A PSW $(comment "默认") -p udp" $UDP_NO_REDIR_PORTS "-j RETURN"
 			add_port_rules "$ipt_m -A PSW $(comment "默认") -p udp" $UDP_NO_REDIR_PORTS "-j RETURN"
@@ -778,7 +787,7 @@ load_acl() {
 				echolog "     - ${msg}不代理所有 UDP 端口"
 			fi
 		}
-		
+
 		local DNS_REDIRECT
 		[ $(config_n_get @global[0] dns_redirect "1") = "1" ] && DNS_REDIRECT=53
 		if [ -n "$NODE" ] && ([ -n "${TCP_PROXY_MODE}" ] || [ -n "${UDP_PROXY_MODE}" ]); then
@@ -786,8 +795,8 @@ load_acl() {
 		else
 			[ -n "${DIRECT_DNSMASQ_PORT}" ] && DNS_REDIRECT=${DIRECT_DNSMASQ_PORT}
 		fi
-		
-		if [ -n "${DNS_REDIRECT}" ]; then
+
+		if [ -n "$DNS_REDIRECT" ]; then
 			$ipt_m -A PSW $(comment "默认") -p udp --dport 53 -j RETURN
 			$ip6t_m -A PSW $(comment "默认") -p udp --dport 53 -j RETURN 2>/dev/null
 			$ipt_m -A PSW $(comment "默认") -p tcp --dport 53 -j RETURN
@@ -796,6 +805,9 @@ load_acl() {
 			$ip6t_n -A PSW_DNS $(comment "默认") -p udp --dport 53 -j REDIRECT --to-ports ${DNS_REDIRECT} 2>/dev/null
 			$ipt_n -A PSW_DNS $(comment "默认") -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_REDIRECT}
 			$ip6t_n -A PSW_DNS $(comment "默认") -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_REDIRECT} 2>/dev/null
+			[ "$DNS_REDIRECT" = "53" ] || {
+				echolog "     - ${msg}DNS 重定向到专用服务器[${DNS_REDIRECT}]"
+			}
 		fi
 
 		[ -n "${TCP_PROXY_MODE}" ] || [ -n "${UDP_PROXY_MODE}" ] && {
@@ -805,7 +817,7 @@ load_acl() {
 				[ "${USE_BLOCK_LIST}" = "1" ] && $ip6t_m -A PSW $(comment "默认") $(dst $IPSET_BLOCK6) -j MARK --set-mark 88 2>/dev/null
 				[ "${USE_DIRECT_LIST}" = "1" ] && $ip6t_m -A PSW $(comment "默认") $(dst $IPSET_WHITE6) -j RETURN 2>/dev/null
 			}
-			
+
 			[ "$TCP_PROXY_DROP_PORTS" != "disable" ] && {
 				[ "$PROXY_IPV6" = "1" ] && {
 					[ "${USE_FAKEDNS}" = "1" ] && add_port_rules "$ip6t_m -A PSW $(comment "默认") -p tcp" $TCP_PROXY_DROP_PORTS "-d $FAKE_IP_6 -j MARK --set-mark 88"
@@ -819,11 +831,11 @@ load_acl() {
 				[ "${USE_PROXY_LIST}" = "1" ] && add_port_rules "$ipt_m -A PSW $(comment "默认") -p tcp" $TCP_PROXY_DROP_PORTS "$(dst $IPSET_BLACK) -j MARK --set-mark 88"
 				[ "${USE_GFW_LIST}" = "1" ] && add_port_rules "$ipt_m -A PSW $(comment "默认") -p tcp" $TCP_PROXY_DROP_PORTS "$(dst $IPSET_GFW) -j MARK --set-mark 88"
 				[ "${CHN_LIST}" != "0" ] && add_port_rules "$ipt_m -A PSW $(comment "默认") -p tcp" $TCP_PROXY_DROP_PORTS "$(dst $IPSET_CHN) $(get_jump_ipt ${CHN_LIST} "-j MARK --set-mark 88")"
-				[ "${USE_SHUNT_NODE}" = "1" ] && add_port_rules "$ipt_m -A PSW $(comment "默认") -p tcp" $TCP_PROXY_DROP_PORTS $(dst $IPSET_SHUNT) "-j MARK --set-mark 88"
+				[ "${USE_SHUNT_NODE}" = "1" ] && add_port_rules "$ipt_m -A PSW $(comment "默认") -p tcp" $TCP_PROXY_DROP_PORTS "$(dst $IPSET_SHUNT) -j MARK --set-mark 88"
 				[ "${TCP_PROXY_MODE}" != "disable" ] && add_port_rules "$ipt_m -A PSW $(comment "默认") -p tcp" $TCP_PROXY_DROP_PORTS "-j MARK --set-mark 88"
 				echolog "     - ${msg}屏蔽代理 TCP 端口[${TCP_PROXY_DROP_PORTS}]"
 			}
-			
+
 			[ "$UDP_PROXY_DROP_PORTS" != "disable" ] && {
 				[ "$PROXY_IPV6" = "1" ] && {
 					[ "${USE_FAKEDNS}" = "1" ] && add_port_rules "$ip6t_m -A PSW $(comment "默认") -p udp" $UDP_PROXY_DROP_PORTS "-d $FAKE_IP_6 -j MARK --set-mark 88"
@@ -863,7 +875,7 @@ load_acl() {
 					msg2="${msg2}(REDIRECT:${REDIR_PORT})"
 					ipt_j="$(REDIRECT $REDIR_PORT)"
 				fi
-				
+
 				[ "$accept_icmp" = "1" ] && {
 					[ "${USE_FAKEDNS}" = "1" ] && $ipt_n -A PSW $(comment "默认") -p icmp -d $FAKE_IP $(REDIRECT)
 					[ "${USE_PROXY_LIST}" = "1" ] && $ipt_n -A PSW $(comment "默认") -p icmp $(dst $IPSET_BLACK) $(REDIRECT)
@@ -872,7 +884,7 @@ load_acl() {
 					[ "${USE_SHUNT_NODE}" = "1" ] && $ipt_n -A PSW $(comment "默认") -p icmp $(dst $IPSET_SHUNT) $(REDIRECT)
 					[ "${TCP_PROXY_MODE}" != "disable" ] && $ipt_n -A PSW $(comment "默认") -p icmp $(REDIRECT)
 				}
-				
+
 				[ "$accept_icmpv6" = "1" ] && [ "$PROXY_IPV6" = "1" ] && {
 					[ "${USE_FAKEDNS}" = "1" ] && $ip6t_n -A PSW $(comment "默认") -p ipv6-icmp -d $FAKE_IP_6 $(REDIRECT)
 					[ "${USE_PROXY_LIST}" = "1" ] && $ip6t_n -A PSW $(comment "默认") -p ipv6-icmp $(dst $IPSET_BLACK6) $(REDIRECT)
@@ -952,22 +964,16 @@ filter_haproxy() {
 }
 
 filter_vpsip() {
-	local vps_addrs=$(uci show $CONFIG | grep -E "(\.address=|\.download_address=|\.domain_resolver_dns=|\.domain_resolver_dns_https=)" | cut -d "'" -f 2 | grep -Ev "$EXCLUDE_VPSIP")
-	local ipv4_addrs=$(echo "$vps_addrs" | grep -Eo "([0-9]{1,3}\.){3}[0-9]{1,3}")
+	local vps_addrs=$(uci show $CONFIG | grep -E "(\.address=|\.download_address=)" | cut -d "'" -f 2 | grep -Ev "$EXCLUDE_VPSIP")
+	local ipv4_addrs=$(echo "$vps_addrs" | grep -Eo "$IPv4_REGEX")
 	[ -n "$ipv4_addrs" ] && {
 		echo "$ipv4_addrs" | sed "s/^/add $IPSET_VPS /" | awk '1; END{print "COMMIT"}' | ipset -! -R
 		echolog "  - [$?]加入所有IPv4节点服务器IP到ipset[$IPSET_VPS]直连完成"
 	}
-	local ipv6_addrs=$(echo "$vps_addrs" | grep -Eo "\[?[A-Fa-f0-9:]*:[A-Fa-f0-9:]+\]?")
+	local ipv6_addrs=$(echo "$vps_addrs" | grep -Eo "$IPv6_REGEX")
 	[ -n "$ipv6_addrs" ] && {
 		echo "$ipv6_addrs" | sed "s/^/add $IPSET_VPS6 /" | awk '1; END{print "COMMIT"}' | ipset -! -R
 		echolog "  - [$?]加入所有IPv6节点服务器IP到ipset[$IPSET_VPS6]直连完成"
-	}
-	#订阅方式为直连时
-	local subscribe_host=$(get_subscribe_host | grep -Ev "$EXCLUDE_VPSIP")
-	[ -n "$subscribe_host" ] && {
-		echo "$subscribe_host" | grep -Eo "([0-9]{1,3}\.){3}[0-9]{1,3}" | sed "s/^/add $IPSET_VPS /" | awk '{print $0} END{print "COMMIT"}' | ipset -! -R
-		echo "$subscribe_host" | grep -Eo "\[?[A-Fa-f0-9:]*:[A-Fa-f0-9:]+\]?" | sed "s/^/add $IPSET_VPS6 /" | awk '{print $0} END{print "COMMIT"}' | ipset -! -R
 	}
 }
 
@@ -975,8 +981,8 @@ filter_server_port() {
 	local address="$1"
 	local port=$(echo "$2" | tr '-' ':' | tr -d ' ')
 	local stream=$(echo "$3" | tr 'A-Z' 'a-z')
-	local ipt_tmp="$ipt_n" _is_tproxy _ipt_cmd _ver multi_ports p ports
-	[ "$(config_n_get @global_forwarding[0] tcp_proxy_way redirect)" = "tproxy" ] && _is_tproxy="TPROXY"
+	local _is_tproxy="$4"
+	local ipt_tmp="$ipt_n" _ipt_cmd _ver multi_ports p ports
 	[ "$stream" = "udp" ] && _is_tproxy="TPROXY"
 	[ -n "$_is_tproxy" ] && ipt_tmp="$ipt_m"
 	for _ver in 4 6; do
@@ -1003,7 +1009,7 @@ filter_server_port() {
 }
 
 filter_node() {
-	local node="$1" stream="$2"
+	local node="$1" stream="$2" _is_tproxy="$3"
 	[ -z "$node" ] && return 1
 	local address=$(config_n_get "$node" address)
 	local port=$(config_n_get "$node" port)
@@ -1012,13 +1018,15 @@ filter_node() {
 	[ -z "$address" ] && return 1
 	echo "$address" | grep -Eq "$EXCLUDE_VPSIP" && return 1
 	[ -z "$port" ] && return 1
-	filter_server_port "$address" "$port" "$stream"
+	filter_server_port "$address" "$port" "$stream" "$_is_tproxy"
 }
 
 filter_direct_node_list() {
 	[ ! -s "$TMP_PATH/direct_node_list" ] && return
+	local _is_tproxy
+	[ "$(config_n_get @global_forwarding[0] tcp_proxy_way redirect)" = "tproxy" ] && _is_tproxy="TPROXY"
 	awk '!seen[$0]++' "$TMP_PATH/direct_node_list" | while read -r _node_id; do
-		filter_node "$_node_id" TCP
+		filter_node "$_node_id" TCP "$_is_tproxy"
 		filter_node "$_node_id" UDP
 		unset _node_id
 	done
@@ -1029,33 +1037,37 @@ update_wan_sets() {
 
 	[ -z "$(command -v get_wan_ips)" ] && . "$UTILS_PATH"
 
-	local WAN_IP=$(get_wan_ips ip4)
-	[ -n "$WAN_IP" ] && {
-		ipset -F "$IPSET_WAN"
-		for wan_ip in $WAN_IP; do
-			ipset -! add "$IPSET_WAN" "$wan_ip"
-		done
-		[ "$log" = "log" ] && {
-			local wan_ip
-			for wan_ip in $WAN_IP; do
-				echolog "  - [$?]加入WAN IPv4到ipset[$IPSET_WAN]：${wan_ip}"
-			done
-		}
-	}
+	(
+		flock -x 9 || exit 1
 
-	local WAN6_IP=$(get_wan_ips ip6)
-	[ -n "$WAN6_IP" ] && {
-		ipset -F "$IPSET_WAN6"
-		for wan6_ip in $WAN6_IP; do
-			ipset -! add "$IPSET_WAN6" "$wan6_ip"
-		done
-		[ "$log" = "log" ] && {
-			local wan6_ip
-			for wan6_ip in $WAN6_IP; do
-				echolog "  - [$?]加入WAN IPv6到ipset[$IPSET_WAN6]：${wan6_ip}"
+		local WAN_IP=$(get_wan_ips ip4)
+		[ -n "$WAN_IP" ] && {
+			# ipset -F "$IPSET_WAN"
+			for wan_ip in $WAN_IP; do
+				ipset -! add "$IPSET_WAN" "$wan_ip"
 			done
+			[ "$log" = "log" ] && {
+				local wan_ip
+				for wan_ip in $WAN_IP; do
+					echolog "  - [$?]加入WAN IPv4到ipset[$IPSET_WAN]：${wan_ip}"
+				done
+			}
 		}
-	}
+
+		local WAN6_IP=$(get_wan_ips ip6)
+		[ -n "$WAN6_IP" ] && {
+			# ipset -F "$IPSET_WAN6"
+			for wan6_ip in $WAN6_IP; do
+				ipset -! add "$IPSET_WAN6" "$wan6_ip"
+			done
+			[ "$log" = "log" ] && {
+				local wan6_ip
+				for wan6_ip in $WAN6_IP; do
+					echolog "  - [$?]加入WAN IPv6到ipset[$IPSET_WAN6]：${wan6_ip}"
+				done
+			}
+		}
+	) 9>"${LOCK_PATH}/${CONFIG}_update_wan_sets.lock"
 }
 
 set_tproxy_sysctl() {
@@ -1109,21 +1121,21 @@ add_firewall_rule() {
 	for acl_section in $(uci show ${CONFIG} | grep "=acl_rule" | cut -d '.' -sf 2 | cut -d '=' -sf 1); do
 		[ "$(config_n_get $acl_section enabled)" != "1" ] && continue
 		[ "$(config_n_get $acl_section use_global_config 0)" != "1" ] && {
-			[ "$(config_n_get $acl_section use_direct_list 1)" = "1" ] && USE_PROXY_LIST_ALL=1
-			[ "$(config_n_get $acl_section use_proxy_list 1)" = "1" ] && USE_DIRECT_LIST_ALL=1
+			[ "$(config_n_get $acl_section use_direct_list 1)" = "1" ] && USE_DIRECT_LIST_ALL=1
+			[ "$(config_n_get $acl_section use_proxy_list 1)" = "1" ] && USE_PROXY_LIST_ALL=1
 			[ "$(config_n_get $acl_section use_block_list 1)" = "1" ] && USE_BLOCK_LIST_ALL=1
 		}
 	done
 
 	#直连列表
 	[ "$USE_DIRECT_LIST_ALL" = "1" ] && {
-		cat $RULES_PATH/direct_ip | tr -s "\r\n" "\n" | grep -v "^#" | sed -e "/^$/d" | grep -E "(\.((2(5[0-5]|[0-4][0-9]))|[0-1]?[0-9]{1,2})){3}" | sed -e "s/^/add $IPSET_WHITE &/g" -e "s/$/ timeout 0/g" | ipset -! -R
-		cat $RULES_PATH/direct_ip | tr -s "\r\n" "\n" | grep -v "^#" | sed -e "/^$/d" | grep -E "([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4}" | sed -e "s/^/add $IPSET_WHITE6 &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+		cat $USER_RULES_PATH/direct_ip | tr -s "\r\n" "\n" | sed 's/#.*//' | grep -E "$IPv4_REGEX" | sed -e "s/^/add $IPSET_WHITE &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+		cat $USER_RULES_PATH/direct_ip | tr -s "\r\n" "\n" | sed 's/#.*//' | grep -E "$IPv6_REGEX" | sed -e "s/^/add $IPSET_WHITE6 &/g" -e "s/$/ timeout 0/g" | ipset -! -R
 		[ "$USE_GEOVIEW" = "1" ] && {
-			local GEOIP_CODE=$(cat $RULES_PATH/direct_ip | tr -s "\r\n" "\n" | sed -e "/^$/d" | grep -E "^geoip:" | grep -v "^geoip:private" | sed -E 's/^geoip:(.*)/\1/' | sed ':a;N;$!ba;s/\n/,/g')
+			local GEOIP_CODE=$(cat $USER_RULES_PATH/direct_ip | tr -s "\r\n" "\n" | sed -e "/^$/d" | grep -E "^geoip:" | grep -v "^geoip:private" | sed -E 's/^geoip:(.*)/\1/' | sed ':a;N;$!ba;s/\n/,/g')
 			if [ -n "$GEOIP_CODE" ]; then
-				get_geoip $GEOIP_CODE ipv4 | grep -E "(\.((2(5[0-5]|[0-4][0-9]))|[0-1]?[0-9]{1,2})){3}" | sed -e "s/^/add $IPSET_WHITE &/g" -e "s/$/ timeout 0/g" | ipset -! -R
-				get_geoip $GEOIP_CODE ipv6 | grep -E "([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4}" | sed -e "s/^/add $IPSET_WHITE6 &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+				get_geoip $GEOIP_CODE ipv4 | sed -e "s/^/add $IPSET_WHITE &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+				get_geoip $GEOIP_CODE ipv6 | sed -e "s/^/add $IPSET_WHITE6 &/g" -e "s/$/ timeout 0/g" | ipset -! -R
 				echolog "  - [$?]解析并加入[直连列表] GeoIP 到 IPSET 完成"
 			fi
 		}
@@ -1131,13 +1143,13 @@ add_firewall_rule() {
 
 	#代理列表
 	[ "$USE_PROXY_LIST_ALL" = "1" ] && {
-		cat $RULES_PATH/proxy_ip | tr -s "\r\n" "\n" | grep -v "^#" | sed -e "/^$/d" | grep -E "(\.((2(5[0-5]|[0-4][0-9]))|[0-1]?[0-9]{1,2})){3}" | sed -e "s/^/add $IPSET_BLACK &/g" -e "s/$/ timeout 0/g" | ipset -! -R
-		cat $RULES_PATH/proxy_ip | tr -s "\r\n" "\n" | grep -v "^#" | sed -e "/^$/d" | grep -E "([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4}" | sed -e "s/^/add $IPSET_BLACK6 &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+		cat $USER_RULES_PATH/proxy_ip | tr -s "\r\n" "\n" | sed 's/#.*//' | grep -E "$IPv4_REGEX" | sed -e "s/^/add $IPSET_BLACK &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+		cat $USER_RULES_PATH/proxy_ip | tr -s "\r\n" "\n" | sed 's/#.*//' | grep -E "$IPv6_REGEX" | sed -e "s/^/add $IPSET_BLACK6 &/g" -e "s/$/ timeout 0/g" | ipset -! -R
 		[ "$USE_GEOVIEW" = "1" ] && {
-			local GEOIP_CODE=$(cat $RULES_PATH/proxy_ip | tr -s "\r\n" "\n" | sed -e "/^$/d" | grep -E "^geoip:" | grep -v "^geoip:private" | sed -E 's/^geoip:(.*)/\1/' | sed ':a;N;$!ba;s/\n/,/g')
+			local GEOIP_CODE=$(cat $USER_RULES_PATH/proxy_ip | tr -s "\r\n" "\n" | sed -e "/^$/d" | grep -E "^geoip:" | grep -v "^geoip:private" | sed -E 's/^geoip:(.*)/\1/' | sed ':a;N;$!ba;s/\n/,/g')
 			if [ -n "$GEOIP_CODE" ]; then
-				get_geoip $GEOIP_CODE ipv4 | grep -E "(\.((2(5[0-5]|[0-4][0-9]))|[0-1]?[0-9]{1,2})){3}" | sed -e "s/^/add $IPSET_BLACK &/g" -e "s/$/ timeout 0/g" | ipset -! -R
-				get_geoip $GEOIP_CODE ipv6 | grep -E "([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4}" | sed -e "s/^/add $IPSET_BLACK6 &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+				get_geoip $GEOIP_CODE ipv4 | sed -e "s/^/add $IPSET_BLACK &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+				get_geoip $GEOIP_CODE ipv6 | sed -e "s/^/add $IPSET_BLACK6 &/g" -e "s/$/ timeout 0/g" | ipset -! -R
 				echolog "  - [$?]解析并加入[代理列表] GeoIP 到 IPSET 完成"
 			fi
 		}
@@ -1145,13 +1157,13 @@ add_firewall_rule() {
 
 	#屏蔽列表
 	[ "$USE_BLOCK_LIST_ALL" = "1" ] && {
-		cat $RULES_PATH/block_ip | tr -s "\r\n" "\n" | grep -v "^#" | sed -e "/^$/d" | grep -E "(\.((2(5[0-5]|[0-4][0-9]))|[0-1]?[0-9]{1,2})){3}" | sed -e "s/^/add $IPSET_BLOCK &/g" -e "s/$/ timeout 0/g" | ipset -! -R
-		cat $RULES_PATH/block_ip | tr -s "\r\n" "\n" | grep -v "^#" | sed -e "/^$/d" | grep -E "([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4}" | sed -e "s/^/add $IPSET_BLOCK6 &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+		cat $USER_RULES_PATH/block_ip | tr -s "\r\n" "\n" | sed 's/#.*//' | grep -E "$IPv4_REGEX" | sed -e "s/^/add $IPSET_BLOCK &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+		cat $USER_RULES_PATH/block_ip | tr -s "\r\n" "\n" | sed 's/#.*//' | grep -E "$IPv6_REGEX" | sed -e "s/^/add $IPSET_BLOCK6 &/g" -e "s/$/ timeout 0/g" | ipset -! -R
 		[ "$USE_GEOVIEW" = "1" ] && {
-			local GEOIP_CODE=$(cat $RULES_PATH/block_ip | tr -s "\r\n" "\n" | sed -e "/^$/d" | grep -E "^geoip:" | grep -v "^geoip:private" | sed -E 's/^geoip:(.*)/\1/' | sed ':a;N;$!ba;s/\n/,/g')
+			local GEOIP_CODE=$(cat $USER_RULES_PATH/block_ip | tr -s "\r\n" "\n" | sed -e "/^$/d" | grep -E "^geoip:" | grep -v "^geoip:private" | sed -E 's/^geoip:(.*)/\1/' | sed ':a;N;$!ba;s/\n/,/g')
 			if [ -n "$GEOIP_CODE" ]; then
-				get_geoip $GEOIP_CODE ipv4 | grep -E "(\.((2(5[0-5]|[0-4][0-9]))|[0-1]?[0-9]{1,2})){3}" | sed -e "s/^/add $IPSET_BLOCK &/g" -e "s/$/ timeout 0/g" | ipset -! -R
-				get_geoip $GEOIP_CODE ipv6 | grep -E "([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4}" | sed -e "s/^/add $IPSET_BLOCK6 &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+				get_geoip $GEOIP_CODE ipv4 | sed -e "s/^/add $IPSET_BLOCK &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+				get_geoip $GEOIP_CODE ipv6 | sed -e "s/^/add $IPSET_BLOCK6 &/g" -e "s/$/ timeout 0/g" | ipset -! -R
 				echolog "  - [$?]解析并加入[屏蔽列表] GeoIP 到 IPSET 完成"
 			fi
 		}
@@ -1165,20 +1177,20 @@ add_firewall_rule() {
 		local shunt_id
 		for shunt_id in $shunt_ids; do
 			[ "${shunt_group}" != "$(config_n_get ${shunt_id} group)" ] && continue
-			config_n_get $shunt_id ip_list | tr -s "\r\n" "\n" | grep -v "^#" | sed -e "/^$/d" | grep -E "(\.((2(5[0-5]|[0-4][0-9]))|[0-1]?[0-9]{1,2})){3}" | sed -e "s/^/add $IPSET_SHUNT &/g" -e "s/$/ timeout 0/g" | ipset -! -R
-			config_n_get $shunt_id ip_list | tr -s "\r\n" "\n" | grep -v "^#" | sed -e "/^$/d" | grep -E "([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4}" | sed -e "s/^/add $IPSET_SHUNT6 &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+			config_n_get $shunt_id ip_list | tr -s "\r\n" "\n" | sed 's/#.*//' | grep -E "$IPv4_REGEX" | sed -e "s/^/add $IPSET_SHUNT &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+			config_n_get $shunt_id ip_list | tr -s "\r\n" "\n" | sed 's/#.*//' | grep -E "$IPv6_REGEX" | sed -e "s/^/add $IPSET_SHUNT6 &/g" -e "s/$/ timeout 0/g" | ipset -! -R
 			[ "$USE_GEOVIEW" = "1" ] && {
 				local geoip_code=$(config_n_get $shunt_id ip_list | tr -s "\r\n" "\n" | sed -e "/^$/d" | grep -E "^geoip:" | grep -v "^geoip:private" | sed -E 's/^geoip:(.*)/\1/' | sed ':a;N;$!ba;s/\n/,/g')
 				[ -n "$geoip_code" ] && GEOIP_CODE="${GEOIP_CODE:+$GEOIP_CODE,}$geoip_code"
 			}
 		done
 		if [ -n "$GEOIP_CODE" ]; then
-			get_geoip $GEOIP_CODE ipv4 | grep -E "(\.((2(5[0-5]|[0-4][0-9]))|[0-1]?[0-9]{1,2})){3}" | sed -e "s/^/add $IPSET_SHUNT &/g" -e "s/$/ timeout 0/g" | ipset -! -R
-			get_geoip $GEOIP_CODE ipv6 | grep -E "([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4}" | sed -e "s/^/add $IPSET_SHUNT6 &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+			get_geoip $GEOIP_CODE ipv4 | sed -e "s/^/add $IPSET_SHUNT &/g" -e "s/$/ timeout 0/g" | ipset -! -R
+			get_geoip $GEOIP_CODE ipv6 | sed -e "s/^/add $IPSET_SHUNT6 &/g" -e "s/$/ timeout 0/g" | ipset -! -R
 			echolog "  - [$?]解析并加入[分流节点] GeoIP 到 IPSET 完成"
 		fi
 	}
-	
+
 	get_local_ips ip4 | sed "s/^/add $IPSET_LOCAL /" | ipset -! -R
 	get_local_ips ip6 | sed "s/^/add $IPSET_LOCAL6 /" | ipset -! -R
 
@@ -1242,6 +1254,8 @@ add_firewall_rule() {
 
 	$ipt_f -I FORWARD $(comment "PSW_REJECT") -m mark --mark 88 -p tcp -j REJECT --reject-with tcp-reset
 	$ipt_f -I FORWARD $(comment "PSW_REJECT") -m mark --mark 88 -p udp -j REJECT
+	$ipt_f -I OUTPUT $(comment "PSW_REJECT") -m mark --mark 88 -p tcp -j REJECT --reject-with tcp-reset
+	$ipt_f -I OUTPUT $(comment "PSW_REJECT") -m mark --mark 88 -p udp -j REJECT
 
 	$ipt_n -N PSW
 	$ipt_n -A PSW $(dst $IPSET_LAN) -j RETURN
@@ -1256,7 +1270,7 @@ add_firewall_rule() {
 	$ipt_n -A PSW_OUTPUT $(dst $IPSET_LAN) -j RETURN
 	$ipt_n -A PSW_OUTPUT $(dst $IPSET_VPS) -j RETURN
 	[ "${USE_DIRECT_LIST}" = "1" ] && $ipt_n -A PSW_OUTPUT $(dst $IPSET_WHITE) -j RETURN
-	$ipt_n -A PSW_OUTPUT -m mark --mark 255 -j RETURN
+	$ipt_n -A PSW_OUTPUT -m mark --mark 0xff/0xff -j RETURN
 
 	$ipt_n -N PSW_DNS
 	if [ $(config_n_get @global[0] dns_redirect "1") = "0" ]; then
@@ -1271,6 +1285,7 @@ add_firewall_rule() {
 	$ipt_m -A PSW_DIVERT -j ACCEPT
 
 	$ipt_m -N PSW_RULE
+	$ipt_m -A PSW_RULE -m mark --mark 88 -j RETURN
 	$ipt_m -A PSW_RULE -j CONNMARK --restore-mark
 	$ipt_m -A PSW_RULE -m mark --mark ${FWMARK} -j RETURN
 	$ipt_m -A PSW_RULE -p tcp -m tcp --syn -j MARK --set-xmark ${FWMARK}
@@ -1286,11 +1301,15 @@ add_firewall_rule() {
 
 	insert_rule_before "$ipt_m" "PREROUTING" "mwan3" "-j PSW"
 	# Only TCP, UDP Invalid.
-	insert_rule_before "$ipt_m" "PREROUTING" "PSW" "-p tcp -m socket -j PSW_DIVERT"
+	insert_rule_before "$ipt_m" "PREROUTING" "PSW" "-p tcp -m socket --transparent -j PSW_DIVERT"
 
 	$ipt_m -N PSW_OUTPUT
 	$ipt_m -A PSW_OUTPUT $(dst $IPSET_LAN) -j RETURN
 	$ipt_m -A PSW_OUTPUT $(dst $IPSET_VPS) -j RETURN
+	$ip6t_m -N PSW_OUTPUT
+	$ip6t_m -A PSW_OUTPUT -m mark --mark 0xff/0xff -j RETURN
+	$ip6t_m -A PSW_OUTPUT $(dst $IPSET_LAN6) -j RETURN
+	$ip6t_m -A PSW_OUTPUT $(dst $IPSET_VPS6) -j RETURN
 	[ -n "$IPT_APPEND_DNS" ] && {
 		local local_dns dns_address dns_port
 		for local_dns in $(echo $IPT_APPEND_DNS | tr ',' ' '); do
@@ -1299,6 +1318,7 @@ add_firewall_rule() {
 			if echo "$dns_address" | grep -q -v ':'; then
 				$ipt_m -A PSW_OUTPUT -p udp -d ${dns_address} --dport ${dns_port:-53} -j RETURN
 				$ipt_m -A PSW_OUTPUT -p tcp -d ${dns_address} --dport ${dns_port:-53} -j RETURN
+				[ -z "${is_tproxy}" ] && $ipt_n -A PSW_OUTPUT -p tcp -d ${dns_address} --dport ${dns_port:-53} -j RETURN
 				echolog "  - [$?]追加直连DNS到iptables：${dns_address}:${dns_port:-53}"
 			else
 				$ip6t_m -A PSW_OUTPUT -p udp -d ${dns_address} --dport ${dns_port:-53} -j RETURN
@@ -1311,7 +1331,7 @@ add_firewall_rule() {
 	[ "${USE_BLOCK_LIST}" = "1" ] && $ipt_m -A PSW_OUTPUT $(dst $IPSET_BLOCK) -j MARK --set-mark 88
 	[ "${USE_DIRECT_LIST}" = "1" ] && $ipt_m -A PSW_OUTPUT $(dst $IPSET_WHITE) -j RETURN
 	$ipt_m -A PSW_OUTPUT -m conntrack --ctdir REPLY -j RETURN
-	$ipt_m -A PSW_OUTPUT -m mark --mark 255 -j RETURN
+	$ipt_m -A PSW_OUTPUT -m mark --mark 0xff/0xff -j RETURN
 
 	ip rule add fwmark ${FWMARK} table 999 priority 999
 	ip route add local 0.0.0.0/0 dev lo table 999
@@ -1326,7 +1346,7 @@ add_firewall_rule() {
 		$ip6t_n -A PSW_OUTPUT $(dst $IPSET_LAN6) -j RETURN
 		$ip6t_n -A PSW_OUTPUT $(dst $IPSET_VPS6) -j RETURN
 		[ "${USE_DIRECT_LIST}" = "1" ] && $ip6t_n -A PSW_OUTPUT $(dst $IPSET_WHITE6) -j RETURN
-		$ip6t_n -A PSW_OUTPUT -m mark --mark 255 -j RETURN
+		$ip6t_n -A PSW_OUTPUT -m mark --mark 0xff/0xff -j RETURN
 	}
 
 	$ip6t_n -N PSW_DNS
@@ -1342,6 +1362,7 @@ add_firewall_rule() {
 	$ip6t_m -A PSW_DIVERT -j ACCEPT
 
 	$ip6t_m -N PSW_RULE
+	$ip6t_m -A PSW_RULE -m mark --mark 88 -j RETURN
 	$ip6t_m -A PSW_RULE -j CONNMARK --restore-mark
 	$ip6t_m -A PSW_RULE -m mark --mark ${FWMARK} -j RETURN
 	$ip6t_m -A PSW_RULE -p tcp -m tcp --syn -j MARK --set-xmark ${FWMARK}
@@ -1350,6 +1371,8 @@ add_firewall_rule() {
 
 	$ip6t_f -I FORWARD $(comment "PSW_REJECT") -m mark --mark 88 -p tcp -j REJECT --reject-with tcp-reset
 	$ip6t_f -I FORWARD $(comment "PSW_REJECT") -m mark --mark 88 -p udp -j REJECT
+	$ip6t_f -I OUTPUT $(comment "PSW_REJECT") -m mark --mark 88 -p tcp -j REJECT --reject-with tcp-reset
+	$ip6t_f -I OUTPUT $(comment "PSW_REJECT") -m mark --mark 88 -p udp -j REJECT
 
 	$ip6t_m -N PSW
 	$ip6t_m -A PSW $(dst $IPSET_LAN6) -j RETURN
@@ -1360,12 +1383,8 @@ add_firewall_rule() {
 
 	insert_rule_before "$ip6t_m" "PREROUTING" "mwan3" "-j PSW"
 	# Only TCP, UDP Invalid.
-	insert_rule_before "$ip6t_m" "PREROUTING" "PSW" "-p tcp -m socket -j PSW_DIVERT"
+	insert_rule_before "$ip6t_m" "PREROUTING" "PSW" "-p tcp -m socket --transparent -j PSW_DIVERT"
 
-	$ip6t_m -N PSW_OUTPUT
-	$ip6t_m -A PSW_OUTPUT -m mark --mark 255 -j RETURN
-	$ip6t_m -A PSW_OUTPUT $(dst $IPSET_LAN6) -j RETURN
-	$ip6t_m -A PSW_OUTPUT $(dst $IPSET_VPS6) -j RETURN
 	[ "${USE_BLOCK_LIST}" = "1" ] && $ip6t_m -A PSW_OUTPUT $(dst $IPSET_BLOCK6) -j MARK --set-mark 88
 	[ "${USE_DIRECT_LIST}" = "1" ] && $ip6t_m -A PSW_OUTPUT $(dst $IPSET_WHITE6) -j RETURN
 	$ip6t_m -A PSW_OUTPUT -m conntrack --ctdir REPLY -j RETURN
@@ -1381,7 +1400,7 @@ add_firewall_rule() {
 		else
 			ipt_j="$(REDIRECT $REDIR_PORT)"
 		fi
-		
+
 		msg="【路由器本机】，"
 		[ "$TCP_NO_REDIR_PORTS" != "disable" ] && {
 			add_port_rules "$ipt_tmp -A PSW_OUTPUT -p tcp" $TCP_NO_REDIR_PORTS "-j RETURN"
@@ -1393,7 +1412,7 @@ add_firewall_rule() {
 				echolog "  - ${msg}不代理所有 TCP 端口"
 			fi
 		}
-		
+
 		[ "$UDP_NO_REDIR_PORTS" != "disable" ] && {
 			add_port_rules "$ipt_m -A PSW_OUTPUT -p udp" $UDP_NO_REDIR_PORTS "-j RETURN"
 			add_port_rules "$ip6t_m -A PSW_OUTPUT -p udp" $UDP_NO_REDIR_PORTS "-j RETURN"
@@ -1416,6 +1435,14 @@ add_firewall_rule() {
 
 		[ -n "${LOCALHOST_TCP_PROXY_MODE}" ] || [ -n "${LOCALHOST_UDP_PROXY_MODE}" ] && {
 			[ "$TCP_PROXY_DROP_PORTS" != "disable" ] && {
+				[ "$PROXY_IPV6" = "1" ] && {
+					[ "${USE_FAKEDNS}" = "1" ] && add_port_rules "$ip6t_m -A PSW_OUTPUT -p tcp" $TCP_PROXY_DROP_PORTS "-d $FAKE_IP_6 -j MARK --set-mark 88"
+					[ "${USE_PROXY_LIST}" = "1" ] && add_port_rules "$ip6t_m -A PSW_OUTPUT -p tcp" $TCP_PROXY_DROP_PORTS "$(dst $IPSET_BLACK6) -j MARK --set-mark 88"
+					[ "${USE_GFW_LIST}" = "1" ] && add_port_rules "$ip6t_m -A PSW_OUTPUT -p tcp" $TCP_PROXY_DROP_PORTS "$(dst $IPSET_GFW6) -j MARK --set-mark 88"
+					[ "${CHN_LIST}" != "0" ] && add_port_rules "$ip6t_m -A PSW_OUTPUT -p tcp" $TCP_PROXY_DROP_PORTS "$(dst $IPSET_CHN6) $(get_jump_ipt ${CHN_LIST} "-j MARK --set-mark 88")"
+					[ "${USE_SHUNT_NODE}" = "1" ] && add_port_rules "$ip6t_m -A PSW_OUTPUT -p tcp" $TCP_PROXY_DROP_PORTS "$(dst $IPSET_SHUNT6) -j MARK --set-mark 88"
+					[ "${LOCALHOST_TCP_PROXY_MODE}" != "disable" ] && add_port_rules "$ip6t_m -A PSW_OUTPUT -p tcp" $TCP_PROXY_DROP_PORTS "-j MARK --set-mark 88"
+				}
 				[ "${USE_FAKEDNS}" = "1" ] && add_port_rules "$ipt_m -A PSW_OUTPUT -p tcp" $TCP_PROXY_DROP_PORTS "-d $FAKE_IP -j MARK --set-mark 88"
 				[ "${USE_PROXY_LIST}" = "1" ] && add_port_rules "$ipt_m -A PSW_OUTPUT -p tcp" $TCP_PROXY_DROP_PORTS "$(dst $IPSET_BLACK) -j MARK --set-mark 88"
 				[ "${USE_GFW_LIST}" = "1" ] && add_port_rules "$ipt_m -A PSW_OUTPUT -p tcp" $TCP_PROXY_DROP_PORTS "$(dst $IPSET_GFW) -j MARK --set-mark 88"
@@ -1424,8 +1451,16 @@ add_firewall_rule() {
 				[ "${LOCALHOST_TCP_PROXY_MODE}" != "disable" ] && add_port_rules "$ipt_m -A PSW_OUTPUT -p tcp" $TCP_PROXY_DROP_PORTS "-j MARK --set-mark 88"
 				echolog "  - ${msg}屏蔽代理 TCP 端口[${TCP_PROXY_DROP_PORTS}]"
 			}
-			
+
 			[ "$UDP_PROXY_DROP_PORTS" != "disable" ] && {
+				[ "$PROXY_IPV6" = "1" ] && {
+					[ "${USE_FAKEDNS}" = "1" ] && add_port_rules "$ip6t_m -A PSW_OUTPUT -p udp" $UDP_PROXY_DROP_PORTS "-d $FAKE_IP_6 -j MARK --set-mark 88"
+					[ "${USE_PROXY_LIST}" = "1" ] && add_port_rules "$ip6t_m -A PSW_OUTPUT -p udp" $UDP_PROXY_DROP_PORTS "$(dst $IPSET_BLACK6) -j MARK --set-mark 88"
+					[ "${USE_GFW_LIST}" = "1" ] && add_port_rules "$ip6t_m -A PSW_OUTPUT -p udp" $UDP_PROXY_DROP_PORTS "$(dst $IPSET_GFW6) -j MARK --set-mark 88"
+					[ "${CHN_LIST}" != "0" ] && add_port_rules "$ip6t_m -A PSW_OUTPUT -p udp" $UDP_PROXY_DROP_PORTS "$(dst $IPSET_CHN6) $(get_jump_ipt ${CHN_LIST} "-j MARK --set-mark 88")"
+					[ "${USE_SHUNT_NODE}" = "1" ] && add_port_rules "$ip6t_m -A PSW_OUTPUT -p udp" $UDP_PROXY_DROP_PORTS "$(dst $IPSET_SHUNT6) -j MARK --set-mark 88"
+					[ "${LOCALHOST_UDP_PROXY_MODE}" != "disable" ] && add_port_rules "$ip6t_m -A PSW_OUTPUT -p udp" $UDP_PROXY_DROP_PORTS "-j MARK --set-mark 88"
+				}
 				[ "${USE_FAKEDNS}" = "1" ] && add_port_rules "$ipt_m -A PSW_OUTPUT -p udp" $UDP_PROXY_DROP_PORTS "-d $FAKE_IP -j MARK --set-mark 88"
 				[ "${USE_PROXY_LIST}" = "1" ] && add_port_rules "$ipt_m -A PSW_OUTPUT -p udp" $UDP_PROXY_DROP_PORTS "$(dst $IPSET_BLACK) -j MARK --set-mark 88"
 				[ "${USE_GFW_LIST}" = "1" ] && add_port_rules "$ipt_m -A PSW_OUTPUT -p udp" $UDP_PROXY_DROP_PORTS "$(dst $IPSET_GFW) -j MARK --set-mark 88"
@@ -1570,7 +1605,7 @@ add_firewall_rule() {
 
 		$ipt_m -I OUTPUT $(comment "mangle-OUTPUT-PSW") -o lo -j RETURN
 		insert_rule_before "$ipt_m" "OUTPUT" "mwan3" "$(comment mangle-OUTPUT-PSW) -m mark --mark ${FWMARK} -j RETURN"
-		
+
 		$ip6t_m -I OUTPUT $(comment "mangle-OUTPUT-PSW") -o lo -j RETURN
 		insert_rule_before "$ip6t_m" "OUTPUT" "mwan3" "$(comment mangle-OUTPUT-PSW) -m mark --mark ${FWMARK} -j RETURN"
 	}
@@ -1590,6 +1625,11 @@ add_firewall_rule() {
 	$ip6t_n -I PREROUTING $(comment "PSW") -m mark --mark ${FWMARK} -j RETURN
 
 	filter_direct_node_list > /dev/null 2>&1 &
+
+	local direct_ipt
+	for direct_ipt in "$ipt_n" "$ipt_m" "$ip6t_n" "$ip6t_m"; do
+		$direct_ipt -I OUTPUT $(comment "PSW_DIRECT") -m owner --gid-owner $DIRECT_GID -j RETURN
+	done
 
 	echolog "防火墙规则加载完成！"
 }
@@ -1684,7 +1724,7 @@ gen_include() {
 		[ -z "${_ipt}" ] && return
 
 		echo "*$2"
-		${_ipt}-save -t $2 | grep "PSW" | grep -v "\-j PSW$" | grep -v "mangle\-OUTPUT\-PSW" | grep -v "socket \-j PSW_DIVERT$" | sed -e "s/^-A \(OUTPUT\|PREROUTING\)/-I \1 1/"
+		${_ipt}-save -t $2 | grep "PSW" | grep -v "PSW_DIRECT" | grep -v "\-j PSW$" | grep -v "mangle\-OUTPUT\-PSW" | grep -v "\-m socket .*\-j PSW_DIVERT$" | sed -e "s/^-A \(OUTPUT\|PREROUTING\|FORWARD\)/-I \1 1/"
 		echo 'COMMIT'
 	}
 	local __ipt=""
@@ -1696,20 +1736,22 @@ gen_include() {
 			mangle_output_psw=\$(${ipt}-save -t mangle | grep "PSW" | grep "mangle\-OUTPUT\-PSW" | sed "s#-A OUTPUT ##g")
 			$ipt-save -c | grep -v "PSW" | $ipt-restore -c
 			$ipt-restore -n <<-EOT
-			$(extract_rules 4 filter)
 			$(extract_rules 4 nat)
 			$(extract_rules 4 mangle)
+			$(extract_rules 4 filter)
 			EOT
 
 			echo "\${mangle_output_psw}" | while read line; do
 				\$(${MY_PATH} insert_rule_before "$ipt_m" "OUTPUT" "mwan3" "\${line}")
 			done
+			$ipt_n -I OUTPUT $(comment "PSW_DIRECT") -m owner --gid-owner $DIRECT_GID -j RETURN
+			$ipt_m -I OUTPUT $(comment "PSW_DIRECT") -m owner --gid-owner $DIRECT_GID -j RETURN
 
 			[ "$accept_icmp" = "1" ] && \$(${MY_PATH} insert_rule_after "$ipt_n" "PREROUTING" "prerouting_rule" "-p icmp -j PSW")
 			[ -z "${is_tproxy}" ] && \$(${MY_PATH} insert_rule_after "$ipt_n" "PREROUTING" "prerouting_rule" "-p tcp -j PSW")
 
 			\$(${MY_PATH} insert_rule_before "$ipt_m" "PREROUTING" "mwan3" "-j PSW")
-			\$(${MY_PATH} insert_rule_before "$ipt_m" "PREROUTING" "PSW" "-p tcp -m socket -j PSW_DIVERT")
+			\$(${MY_PATH} insert_rule_before "$ipt_m" "PREROUTING" "PSW" "-p tcp -m socket --transparent -j PSW_DIVERT")
 		EOF
 		)
 	}
@@ -1719,19 +1761,21 @@ gen_include() {
 			mangle_output_psw=\$(${ip6t}-save -t mangle | grep "PSW" | grep "mangle\-OUTPUT\-PSW" | sed "s#-A OUTPUT ##g")
 			$ip6t-save -c | grep -v "PSW" | $ip6t-restore -c
 			$ip6t-restore -n <<-EOT
-			$(extract_rules 6 filter)
 			$(extract_rules 6 nat)
 			$(extract_rules 6 mangle)
+			$(extract_rules 6 filter)
 			EOT
 
 			echo "\${mangle_output_psw}" | while read line; do
 				\$(${MY_PATH} insert_rule_before "$ip6t_m" "OUTPUT" "mwan3" "\${line}")
 			done
+			$ip6t_n -I OUTPUT $(comment "PSW_DIRECT") -m owner --gid-owner $DIRECT_GID -j RETURN
+			$ip6t_m -I OUTPUT $(comment "PSW_DIRECT") -m owner --gid-owner $DIRECT_GID -j RETURN
 
 			[ "$accept_icmpv6" = "1" ] && $ip6t_n -A PREROUTING -p ipv6-icmp -j PSW
 
 			\$(${MY_PATH} insert_rule_before "$ip6t_m" "PREROUTING" "mwan3" "-j PSW")
-			\$(${MY_PATH} insert_rule_before "$ip6t_m" "PREROUTING" "PSW" "-p tcp -m socket -j PSW_DIVERT")
+			\$(${MY_PATH} insert_rule_before "$ip6t_m" "PREROUTING" "PSW" "-p tcp -m socket --transparent -j PSW_DIVERT")
 		EOF
 		)
 	}
@@ -1769,6 +1813,8 @@ stop() {
 		rm -rf $TMP_PATH2/singbox*
 		rm -rf $TMP_PATH2/dnsmasq*
 		rm -rf $TMP_PATH2/geo_output
+		rm -rf $TMP_PATH2/geodata
+		rm -rf $TMP_PATH2/user_rules
 	}
 	flush_include
 }

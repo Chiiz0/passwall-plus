@@ -69,6 +69,12 @@ copy_built_package() {
 	find "${IMAGEBUILDER_DIR}/packages" -maxdepth 1 -type f \
 		-name "${package}-*.apk" -delete
 	cp --force "${package_file}" "${IMAGEBUILDER_DIR}/packages/"
+	case "${package}" in
+		luci-app-passwall|luci-i18n-passwall-zh-cn)
+			find "${DIST_DIR}" -maxdepth 1 -type f -name "${package}-*.apk" -delete
+			cp --force "${package_file}" "${DIST_DIR}/"
+			;;
+	esac
 }
 
 for command_name in curl find gawk git gzip make nproc qemu-img sed sha256sum sort tar xargs zstd; do
@@ -87,12 +93,23 @@ printf 'src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-pa
 	"${PASSWALL_PACKAGES_COMMIT}" >> feeds.conf.passwall-plus
 printf 'src-link passwall_plus %s\n' "${REPO_ROOT}" >> feeds.conf.passwall-plus
 mv feeds.conf.passwall-plus feeds.conf.default
-
 ./scripts/feeds update base packages luci passwall_packages passwall_plus
+# Xray 26.10 requires Go 1.27; 25.12.5's target package feeds stay unchanged.
+git -C feeds/packages fetch --depth=1 --no-tags https://github.com/openwrt/packages.git \
+	"${OPENWRT_GOLANG_COMMIT}"
+git -C feeds/packages restore --source="${OPENWRT_GOLANG_COMMIT}" --worktree -- lang/golang
+sed -i "s/^GO_DEFAULT_VERSION:=.*/GO_DEFAULT_VERSION:=${OPENWRT_GOLANG_VERSION}/" \
+	feeds/packages/lang/golang/golang-values.mk
+# The feed scanner caches leaf Makefiles and can miss changes in included .mk files.
+rm -rf -- feeds/packages.tmp
+./scripts/feeds update -i packages
+./scripts/feeds install -p packages golang "golang${OPENWRT_GOLANG_VERSION}"
 ./scripts/feeds install -a -p passwall_packages
 ./scripts/feeds install -p packages openvpn
 ./scripts/feeds install -f -p passwall_plus luci-app-passwall
 
+# Regenerate SDK dependency metadata after the host toolchain overlay.
+rm -rf -- tmp
 cp "${OPENWRT_DIR}/sdk.config" .config
 make defconfig
 make -j"${JOBS}" \
@@ -149,6 +166,7 @@ OpenWrt: ${OPENWRT_VERSION} ${OPENWRT_REVISION}
 Kernel: ${OPENWRT_KERNEL}
 Target: ${OPENWRT_TARGET}/${OPENWRT_SUBTARGET} (${OPENWRT_ARCH})
 PassWall packages feed: ${PASSWALL_PACKAGES_COMMIT}
+Go build tooling: ${OPENWRT_GOLANG_COMMIT} (Go ${OPENWRT_GOLANG_VERSION})
 PassWall Plus source: $(git -C "${REPO_ROOT}" rev-parse HEAD)
 Rootfs partition: ${ROOTFS_PARTSIZE} MiB
 EOF

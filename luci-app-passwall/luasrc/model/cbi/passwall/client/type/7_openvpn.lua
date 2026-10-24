@@ -11,9 +11,11 @@ if s1.val["type"] ~= type_name then
 	return
 end
 
-local s = NamedSection(m, arg[1], "server")
+local s = NamedSection(m, arg[1], "tmp_" .. s1.sectiontype)
+s.parent = s1
 s.type_name = type_name
 s.option_prefix = "openvpn_"
+api.set_type_cbi(s)
 
 o = s:option(TextValue, "config", translate("OpenVPN client profile"), translate("Paste the complete .ovpn client profile. PassWall removes profile directives that can execute commands or change system routing."))
 o.rows = 16
@@ -78,4 +80,4 @@ o.validate = function(self, value)
 	return nil, translate("The OpenVPN pre-proxy must be a normal Xray or Sing-box node.")
 end
 
-api.luci_types(s1, s)
+api.type_cbi_section(s1, s)

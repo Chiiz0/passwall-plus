@@ -2,7 +2,9 @@
 
 PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/Openwrt-Passwall/openwrt-passwall) 的增强分支，重点解决局域网设备身份绑定、按设备选择出口、明确拒绝 IPv6，以及全局和单设备 OpenVPN 全流量转发。
 
-当前源码版本：`26.8.26-r6`
+当前源码版本：`26.10.22-r3`
+
+本轮同步上游至 `4b74bdd7`（2026-10-24），吸收节点列表排序与筛选、DNS/订阅修复和下载 SHA-256 校验，同时保留 Plus 的设备绑定与 OpenVPN 功能。专属固件继续使用 OpenWrt `25.12.5`，代理核心更新为 Xray `26.10.21`、Sing-box `1.14.4`。
 
 > 仓库名称为 `passwall-plus`。为兼容现有 OpenWrt 软件包、LuCI 路径、UCI 配置和升级流程，内部包名继续使用 `luci-app-passwall`，配置仍位于 `/etc/config/passwall`。
 
@@ -20,6 +22,8 @@ PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/O
 IPv6 会从内核 sysctl、WAN/LAN 接口、RA/DHCPv6 和 PassWall 同时关闭，LAN 防火墙仍保留一条显式 IPv6 `REJECT` 规则。构建和 QEMU 验证方法见 [openwrt/README.md](openwrt/README.md)。固件不内置订阅、`.ovpn`、私钥或默认密码。
 
 可直接从 [GitHub Releases](https://github.com/Chiiz0/passwall-plus/releases) 下载固件。普通 BIOS 的 VMware 虚拟机选择 `generic-ext4-combined.vmdk`，UEFI 虚拟机选择 `generic-ext4-combined-efi.vmdk`；其他虚拟化平台或物理 x86/64 设备可使用对应的压缩 `.img.gz`。每个 Release 同时提供 `SHA256SUMS`。
+
+Release 还提供与该固件匹配的 LuCI 主程序和简体中文 APK。Plus 的 LuCI 在线更新只使用本仓库的发布包，并按 APK 中的应用版本判断更新；Xray、Sing-box 等独立组件继续使用各自上游。旧版 OpenWrt 的 IPK 需在对应 SDK 中自行编译。
 
 当前固件已用双 e1000 网卡实际启动验证：WAN DHCP、LuCI、OpenVPN/Xray/Sing-box、IPv6 禁用、`fw4 check` 和 `fw4 reload` 均通过，内核日志没有 nftables 段错误。由此绕开 Kwrt 的固件基线问题，而不是在 PassWall 中掩盖 `libnftables` 崩溃。
 

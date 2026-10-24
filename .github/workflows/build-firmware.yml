@@ -21,8 +21,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes \
             build-essential clang flex bison g++ gawk gcc-multilib gettext \
-            git libncurses-dev libssl-dev python3-setuptools qemu-system-x86 \
+            git libncurses-dev libssl-dev lua5.1 python3-setuptools qemu-system-x86 \
             qemu-utils rsync swig unzip zlib1g-dev zstd
+
+      - name: Verify Plus updater
+        run: python3 openwrt/tests/test-updater.py
 
       - name: Build firmware
         run: ./openwrt/scripts/build-firmware.sh

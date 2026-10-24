@@ -19,6 +19,15 @@ _M.order = {
 	"hysteria"
 }
 
+-- Keep the LuCI updater on this fork so an update cannot remove Plus features.
+_M.passwall = {
+	name = "PassWall Plus",
+	repo = "Chiiz0/passwall-plus",
+	get_url = function(self)
+		return "https://api.github.com/repos/" .. self.repo .. "/releases/latest"
+	end
+}
+
 _M.hysteria = {
 	name = "Hysteria",
 	repo = "HyNetwork/hysteria",

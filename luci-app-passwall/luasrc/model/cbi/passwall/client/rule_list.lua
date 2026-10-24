@@ -2,12 +2,15 @@ local api = require "luci.passwall.api"
 local fs = api.fs
 local sys = api.sys
 local datatypes = api.datatypes
-local path = string.format("/usr/share/%s/rules/", api.appname)
-local gfwlist_path = path .. "gfwlist"
-local chnlist_path = path .. "chnlist"
-local chnroute_path = path .. "chnroute"
+local path = string.format("/etc/%s/rules/", api.appname)
+local gfwlist_path = "/usr/share/" .. api.appname .. "/rules/gfwlist"
+local chnlist_path = "/usr/share/" .. api.appname .. "/rules/chnlist"
+local chnroute_path = "/usr/share/" .. api.appname .. "/rules/chnroute"
 
-m = Map(api.appname)
+api.set_default_cbi()
+
+m = Map()
+m.apply_on_parse = true
 
 function clean_text(text)
 	local nbsp = string.char(0xC2, 0xA0) -- 不间断空格（U+00A0）
@@ -42,11 +45,9 @@ o.cfgvalue = function(self, section)
 end
 o.write = function(self, section, value)
 	fs.writefile(direct_host, value:gsub("\r\n", "\n"))
-	sys.call("rm -rf /tmp/etc/passwall_tmp/dns_*")
 end
 o.remove = function(self, section, value)
 	fs.writefile(direct_host, "")
-	sys.call("rm -rf /tmp/etc/passwall_tmp/dns_*")
 end
 o.validate = function(self, value)
 	local hosts= {}
@@ -100,11 +101,9 @@ o.cfgvalue = function(self, section)
 end
 o.write = function(self, section, value)
 	fs.writefile(proxy_host, value:gsub("\r\n", "\n"))
-	sys.call("rm -rf /tmp/etc/passwall_tmp/dns_*")
 end
 o.remove = function(self, section, value)
 	fs.writefile(proxy_host, "")
-	sys.call("rm -rf /tmp/etc/passwall_tmp/dns_*")
 end
 o.validate = function(self, value)
 	local hosts= {}
@@ -314,7 +313,7 @@ if fs.access(chnroute_path) then
 	]], translate("Read List"))
 end
 
-m:append(Template(api.appname .. "/rule_list/js"))
+m:appendTemplate("/rule_list/js")
 
 local geo_dir = (api.uci_get_c("@global_rules[0]", "v2ray_location_asset") or "/usr/share/v2ray/"):match("^(.*)/")
 local geosite_path = geo_dir .. "/geosite.dat"
@@ -324,7 +323,7 @@ if api.finded_com("geoview") and fs.access(geosite_path) and fs.access(geoip_pat
 		s:tab("geoview", translate("Geo View"))
 		o = s:taboption("geoview", DummyValue, "_geoview_fieldset")
 		o.rawhtml = true
-		o.template = api.appname .. "/rule_list/geoview"
+		o.template = m:template_path("/rule_list/geoview")
 	end
 end
 
@@ -332,4 +331,4 @@ m.on_before_save = function(self)
 	m:set("@global[0]", "flush_set", "1")
 end
 
-return m
+return api.return_map(m)
