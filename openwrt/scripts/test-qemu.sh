@@ -114,6 +114,12 @@ done
 ubus call network.interface.wan status | grep -q '"up": true'
 
 apk info -e luci-app-passwall
+apk info -e luci-app-passwall-ezcnet
+test "$(uci -q get passwall_ezcnet.main.enabled)" = '0'
+test "$(uci -q get passwall_ezcnet.main.server)" = 'https://passwall.ezcnet.com'
+test -z "$(uci -q get passwall_ezcnet.main.key)"
+test -x /etc/init.d/passwall-ezcnet
+test -f /usr/share/passwall-ezcnet/agent.lua
 apk info -e openvpn-openssl
 apk info -e xray-core
 apk info -e sing-box
@@ -132,7 +138,7 @@ test -f /var/lock/passwall_ready.lock
 # Compile every installed Lua source with the firmware's native Lua compiler.
 # lua is installed by LuCI; standalone luac is not part of the firmware.
 lua <<'LUA'
-local command = "find /usr/lib/lua/luci/passwall /usr/lib/lua/luci/model/cbi/passwall /usr/lib/lua/luci/controller/passwall.lua /usr/share/passwall -name '*.lua'"
+local command = "find /usr/lib/lua/luci/passwall /usr/lib/lua/luci/model/cbi/passwall /usr/lib/lua/luci/controller/passwall.lua /usr/share/passwall /usr/share/passwall-ezcnet /usr/lib/lua/luci/controller/passwall_ezcnet.lua /usr/lib/lua/luci/model/cbi/passwall_ezcnet.lua -name '*.lua'"
 local files = assert(io.popen(command))
 local count = 0
 for path in files:lines() do
@@ -194,6 +200,13 @@ for page in settings node_config/qemu_vpn acl_config/qemu_device; do
 	grep -q "$control" /tmp/passwall-qemu-form.html
 	printf 'LuCI form passed: %s\n' "$page"
 done
+status=$(curl --max-time 45 --silent --show-error --location \
+	--output /tmp/passwall-ezcnet-qemu-form.html --write-out '%{http_code}' \
+	--cookie "sysauth_http=$session" \
+	'http://127.0.0.1/cgi-bin/luci/admin/services/passwall_ezcnet')
+test "$status" = 200
+grep -q 'cbid.passwall_ezcnet.main.key' /tmp/passwall-ezcnet-qemu-form.html
+printf 'LuCI form passed: passwall-EzCNet\n'
 ubus call session destroy "{\"ubus_rpc_session\":\"$session\"}" >/dev/null
 unset session
 set -x
@@ -256,3 +269,6 @@ fi
 
 echo 'PassWall Plus QEMU firmware checks passed'
 EOF
+
+# Reference migration tests use an isolated UCI directory in the disposable VM.
+ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua < "${OPENWRT_DIR}/tests/test-ezcnet-catalog.lua"

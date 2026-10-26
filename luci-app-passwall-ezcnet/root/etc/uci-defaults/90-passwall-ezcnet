@@ -1,0 +1,6 @@
+#!/bin/sh
+chmod 600 /etc/config/passwall_ezcnet
+mkdir -p /etc/passwall_ezcnet
+chmod 700 /etc/passwall_ezcnet
+/etc/init.d/passwall-ezcnet enable
+exit 0

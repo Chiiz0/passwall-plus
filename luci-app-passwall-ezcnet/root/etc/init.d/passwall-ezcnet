@@ -1,0 +1,24 @@
+#!/bin/sh /etc/rc.common
+USE_PROCD=1
+START=99
+STOP=10
+
+start_service() {
+	local enabled key
+	config_load passwall_ezcnet
+	config_get_bool enabled main enabled 0
+	config_get key main key
+	# Keep the local subscription scheduler running even when cloud access is disabled.
+	chmod 600 /etc/config/passwall_ezcnet
+	procd_open_instance
+	procd_set_param command /usr/bin/lua /usr/share/passwall-ezcnet/agent.lua
+	procd_set_param respawn 3600 5 5
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_set_param term_timeout 75
+	procd_close_instance
+}
+
+service_triggers() {
+	procd_add_reload_trigger passwall_ezcnet
+}

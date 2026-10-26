@@ -3,6 +3,8 @@
 ------------------------------------------------
 -- @author William Chan <root@williamchan.me>
 ------------------------------------------------
+local library_options = ...
+local library_mode = type(library_options) == 'table' and library_options.library == true
 require 'luci.util'
 require 'luci.jsonc'
 require 'luci.sys'
@@ -25,9 +27,11 @@ local tinsert = table.insert
 local ssub, slen, schar, sbyte, sformat, sgsub = string.sub, string.len, string.char, string.byte, string.format, string.gsub
 
 -- [[ 逻辑锁 Start ]] --
+local update_lock
+if not library_mode then
 if not arg[1] then os.exit(0) end
 -- Both update scripts use the same lockf lock; the kernel releases it on exit.
-local update_lock = api.nixio.open(api.LOCK_PREFIX .. "_sub_rule.lock", api.nixio.open_flags("rdwr", "creat"))
+update_lock = api.nixio.open(api.LOCK_PREFIX .. "_sub_rule.lock", api.nixio.open_flags("rdwr", "creat"))
 if not update_lock then
 	api.log("无法打开订阅/规则更新锁，退出。")
 	os.exit(1)
@@ -50,6 +54,7 @@ end
 update_lock:write("s")
 update_lock:seek(0)
 api.uci:revert(c_config)
+end
 math.randomseed(os.time() + math.floor(os.clock() * 1000))
 local restart_required = false
 -- [[ 逻辑锁 End ]] --
@@ -133,6 +138,7 @@ local isDebug = false
 local log_buffer = nil
 
 local log = function(...)
+	if library_mode then return end
 	if log_buffer then
 		local n = select("#", ...)
 		tinsert(log_buffer, n == 1 and (...) or table.concat({...}, " "))
@@ -161,7 +167,7 @@ end
 
 -- 获取各项动态配置的当前服务器，可以用 get 和 set， get必须要获取到节点表
 local CONFIG = {}
-do
+if not library_mode then
 	if true then
 		local szType = "@global[0]"
 		local option = "node"
@@ -2246,6 +2252,45 @@ local function parse_link(raw, add_mode, group, sub_cfg)
 	end
 end
 
+-- Read-only parser API shared with EzCNet. No locks, commits, reference cleanup,
+-- temporary global links file, or restart are performed in library mode.
+if library_mode then
+	return {
+		parse = function(raw, group, sub_cfg)
+			assert(type(raw) == "string" and #raw <= 262144, "input_too_large")
+			sub_cfg = sub_cfg or {allowInsecure = "0", filter_keyword_mode = "0"}
+			local old_log = api.log
+			api.log = function() end -- converter diagnostics can contain provider data
+			local ok, converted, conversion_issues = pcall(parseClashNode, raw, "EzCNet")
+			api.log = old_log
+			if not ok or converted == "" then return {}, {{index=0,code="invalid_yaml"}} end
+			raw = converted
+			if not raw:find("://", 1, true) then raw = base64Decode(raw) end
+			local nodes, errors, filter = {}, conversion_issues or {}, prepare_keyword_filter(sub_cfg)
+			local index = 0
+			for line in (raw .. "\n"):gmatch("([^\n]*)\n") do
+				if line:match("%S") then
+					index = index + 1
+					if index > 2000 then error("too_many_nodes") end
+					local kind, content = api.trim(line):match("^([%w%-]+)://(.+)$")
+					local parsed, node = pcall(function()
+						if not kind then return nil end
+						if kind == "vmess" or kind == "ssr" then content = base64Decode(content:gsub("#.*$", "")) end
+						return processData(kind, content:gsub("&amp;", "&"), "1", group, sub_cfg)
+					end)
+					local code
+					if not parsed or not node or node.error_msg or not node.type then code = "invalid_or_unsupported"
+					elseif not node.address or not (datatypes.hostname(node.address) or api.is_ip(node.address)) or not tonumber(node.port) or tonumber(node.port) < 1 or tonumber(node.port) > 65535 then code = "invalid_endpoint"
+					elseif is_filter_keyword(filter, node.remarks or "") then code = "filtered"
+					else nodes[#nodes+1] = node end
+					if code then errors[#errors+1] = {index=index,code=code} end
+				end
+			end
+			return nodes, errors
+		end
+	}
+end
+
 local execute = function()
 	do
 		local subscribe_list = {}
@@ -2260,6 +2305,12 @@ local execute = function()
 			end)
 		end
 
+		local unmanaged = {}
+		for _, entry in ipairs(subscribe_list) do
+			if entry.ezcnet_managed ~= "1" then unmanaged[#unmanaged+1] = entry
+			else log("EzCNet 托管订阅请在云控平台更新；本地定时任务由云控插件执行。") end
+		end
+		subscribe_list = unmanaged
 		local manual_sub = arg[3] == "manual"
 
 		for index, value in ipairs(subscribe_list) do

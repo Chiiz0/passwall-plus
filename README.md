@@ -2,7 +2,7 @@
 
 PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/Openwrt-Passwall/openwrt-passwall) 的增强分支，重点解决局域网设备身份绑定、按设备选择出口、明确拒绝 IPv6，以及全局和单设备 OpenVPN 全流量转发。
 
-当前源码版本：`26.10.22-r3`
+当前源码版本：`26.10.22-r4`，云控插件：`0.2.0-r1`
 
 本轮同步上游至 `4b74bdd7`（2026-10-24），吸收节点列表排序与筛选、DNS/订阅修复和下载 SHA-256 校验，同时保留 Plus 的设备绑定与 OpenVPN 功能。专属固件继续使用 OpenWrt `25.12.5`，代理核心更新为 Xray `26.10.21`、Sing-box `1.14.4`。
 
@@ -28,6 +28,23 @@ Release 还提供与该固件匹配的 LuCI 主程序和简体中文 APK。Plus 
 当前固件已用双 e1000 网卡实际启动验证：WAN DHCP、LuCI、OpenVPN/Xray/Sing-box、IPv6 禁用、`fw4 check` 和 `fw4 reload` 均通过，内核日志没有 nftables 段错误。由此绕开 Kwrt 的固件基线问题，而不是在 PassWall 中掩盖 `libnftables` 崩溃。
 
 ## 核心能力
+
+### passwall-EzCNet 云控
+
+新增独立软件包 `luci-app-passwall-ezcnet`，专属固件构建会自动包含。
+在 LuCI“服务 → passwall-EzCNet”中填写 `https://passwall.ezcnet.com`
+和平台生成的设备 Key，启用后可查看状态，管理订阅、导入 URI/Base64/Clash/OpenVPN
+节点，预览后应用，搜索、测试、切换和删除节点，并修改主代理开关、TCP/UDP
+策略、本机/LAN 代理以及已有 ACL 的启用开关。
+插件默认关闭，不预置 Key，不开放额外管理端口。
+
+配置下发包含版本冲突检查、稳定节点 ID、引用保护、异步回执和失联回滚。
+普通心跳不上传订阅 URL、节点密钥或完整配置；用户提交的导入内容在云端临时加密排队，完成后清除。云控服务端与部署说明位于同级独立项目
+`../passwall-EzCNet/`。从专属固件 `25.12.5-r5` 起默认打包此插件；更早的
+镜像需升级固件或安装匹配版本的软件包。详细说明见
+[云控插件说明](luci-app-passwall-ezcnet/README.md)。
+
+### 代理与设备策略
 
 | 能力 | 行为 |
 | --- | --- |

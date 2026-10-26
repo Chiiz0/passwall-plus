@@ -7,6 +7,8 @@ fullcone patches, or custom miniupnp packages.
 ## Included behavior
 
 - PassWall Plus with nftables, OpenVPN, Xray, and Sing-box support.
+- `luci-app-passwall-ezcnet` cloud agent and LuCI settings, disabled by default
+  with no embedded device Key; the default HTTPS endpoint is passwall.ezcnet.com.
 - Global and per-device OpenVPN, including Xray/Sing-box pre-proxy nodes.
 - DHCP static lease and IP/MAC binding support from PassWall Plus.
 - `eth0` as LAN at `10.0.0.1/24`; `eth1` as DHCP WAN.
@@ -77,11 +79,15 @@ git tag -a firmware-v25.12.5-r1 -m "PassWall Plus OpenWrt 25.12.5 r1"
 git push origin firmware-v25.12.5-r1
 ```
 
-The release also includes the built `luci-app-passwall` and Simplified Chinese
-translation APKs. The LuCI self-updater reads this repository's release assets and
+The release also includes the built `luci-app-passwall`, `luci-app-passwall-ezcnet`,
+and Simplified Chinese translation APKs. The LuCI self-updater reads this repository's release assets and
 compares the package version, independently of the OpenWrt firmware tag. These
 APKs target the dedicated 25.12 firmware; older opkg releases need their own SDK
 builds.
+
+EzCNet is included by default starting with firmware `25.12.5-r5`. When adding it
+to an older image, install both PassWall Plus `26.10.22-r4` and EzCNet `0.2.0-r1`;
+the agent requires the Plus parser interface introduced in this release.
 
 ## VMware installation
 

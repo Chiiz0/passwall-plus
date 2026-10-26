@@ -649,20 +649,24 @@ function parseClashNode(raw, remark)
 		end
 	end
 
-	local links = {}
-	for _, node in ipairs(data.proxies) do
+	local links, issues = {}, {}
+	for index, node in ipairs(data.proxies) do
 		local converted, err, link = pcall(encode_node, node)
 		if not converted then
+			issues[#issues+1] = {index=index,code="invalid_or_unsupported"}
 			local name = type(node) == "table" and node.name or ""
 			api.log('订阅转换 → 丢弃节点：' .. tostring(name or "") .. '，转换失败，已跳过。')
 		elseif err == 1 and link then
+			issues[#issues+1] = {index=index,code="invalid_or_unsupported"}
 			api.log(link)
 		elseif link then
 			table.insert(links, link)
+		else
+			issues[#issues+1] = {index=index,code="invalid_or_unsupported"}
 		end
 	end
 
-	return #links > 0 and table.concat(links, "\n") or ""
+	return #links > 0 and table.concat(links, "\n") or "", issues
 end
 
 function parse_clash_sub_info(headers)

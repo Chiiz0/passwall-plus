@@ -1,0 +1,7 @@
+{
+  "luci-app-passwall-ezcnet": {
+    "description": "Manage passwall-EzCNet connection",
+    "read": {"uci": ["passwall_ezcnet"]},
+    "write": {"uci": ["passwall_ezcnet"]}
+  }
+}

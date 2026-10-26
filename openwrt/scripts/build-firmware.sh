@@ -70,7 +70,7 @@ copy_built_package() {
 		-name "${package}-*.apk" -delete
 	cp --force "${package_file}" "${IMAGEBUILDER_DIR}/packages/"
 	case "${package}" in
-		luci-app-passwall|luci-i18n-passwall-zh-cn)
+		luci-app-passwall|luci-app-passwall-ezcnet|luci-i18n-passwall-zh-cn)
 			find "${DIST_DIR}" -maxdepth 1 -type f -name "${package}-*.apk" -delete
 			cp --force "${package_file}" "${DIST_DIR}/"
 			;;
@@ -107,6 +107,7 @@ rm -rf -- feeds/packages.tmp
 ./scripts/feeds install -a -p passwall_packages
 ./scripts/feeds install -p packages openvpn
 ./scripts/feeds install -f -p passwall_plus luci-app-passwall
+./scripts/feeds install -f -p passwall_plus luci-app-passwall-ezcnet
 
 # Regenerate SDK dependency metadata after the host toolchain overlay.
 rm -rf -- tmp
@@ -120,7 +121,8 @@ make -j"${JOBS}" \
 	package/tcping/compile \
 	package/xray-core/compile \
 	package/sing-box/compile \
-	package/luci-app-passwall/compile
+	package/luci-app-passwall/compile \
+	package/luci-app-passwall-ezcnet/compile
 
 copy_built_package chinadns-ng
 copy_built_package dns2socks
@@ -130,6 +132,7 @@ copy_built_package tcping
 copy_built_package xray-core
 copy_built_package sing-box
 copy_built_package luci-app-passwall
+copy_built_package luci-app-passwall-ezcnet
 copy_built_package luci-i18n-passwall-zh-cn
 
 PACKAGE_LIST=$(gawk 'NF && $1 !~ /^#/ { printf "%s ", $1 }' "${OPENWRT_DIR}/packages.txt")
@@ -172,6 +175,7 @@ Rootfs partition: ${ROOTFS_PARTSIZE} MiB
 EOF
 
 grep -q 'luci-app-passwall' "${DIST_DIR}/packages.manifest"
+grep -q '^luci-app-passwall-ezcnet ' "${DIST_DIR}/packages.manifest"
 grep -q 'openvpn-openssl' "${DIST_DIR}/packages.manifest"
 grep -q 'xray-core' "${DIST_DIR}/packages.manifest"
 grep -q 'sing-box' "${DIST_DIR}/packages.manifest"

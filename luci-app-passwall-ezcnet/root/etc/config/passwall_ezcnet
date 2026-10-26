@@ -1,0 +1,4 @@
+config cloud 'main'
+	option enabled '0'
+	option server 'https://passwall.ezcnet.com'
+	option key ''

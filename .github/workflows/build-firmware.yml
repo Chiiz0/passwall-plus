@@ -27,6 +27,9 @@ jobs:
       - name: Verify Plus updater
         run: python3 openwrt/tests/test-updater.py
 
+      - name: Verify EzCNet command validation
+        run: lua5.1 openwrt/tests/test-ezcnet.lua
+
       - name: Build firmware
         run: ./openwrt/scripts/build-firmware.sh
 
