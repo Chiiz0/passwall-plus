@@ -7,8 +7,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-passwall
-PKG_VERSION:=26.10.22
-PKG_RELEASE:=4
+PKG_VERSION:=26.10.29
+PKG_RELEASE:=2
 PKG_PO_VERSION:=$(PKG_VERSION)
 
 PKG_CONFIG_DEPENDS:= \
@@ -170,16 +170,8 @@ define Package/$(PKG_NAME)/conffiles
 /etc/passwall/
 endef
 
-define Package/$(PKG_NAME)/postinst
-#!/bin/sh
-rm -f $${IPKG_INSTROOT}/usr/share/passwall/rules/*.nft
-rm -rf $${IPKG_INSTROOT}/tmp/etc/passwall_tmp
-exit 0
-endef
-
 define Package/$(PKG_NAME)/postrm
 #!/bin/sh
-rm -f $${IPKG_INSTROOT}/usr/share/passwall/rules/*.nft
 if [ -z "$${IPKG_INSTROOT}" ] && command -v uci >/dev/null 2>&1; then
 	for section in $$(uci -q show dhcp | sed -n "s/^dhcp\.\([^.=]*\)\.passwall_managed='1'/\1/p"); do
 		uci -q delete "dhcp.$${section}"
@@ -187,9 +179,9 @@ if [ -z "$${IPKG_INSTROOT}" ] && command -v uci >/dev/null 2>&1; then
 	uci -q commit dhcp
 	/etc/init.d/dnsmasq reload >/dev/null 2>&1
 fi
-rm -rf $${IPKG_INSTROOT}/tmp/etc/passwall_tmp
 exit 0
 endef
+
 
 include $(TOPDIR)/feeds/luci/luci.mk
 
