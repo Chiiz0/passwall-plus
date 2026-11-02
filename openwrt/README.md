@@ -84,8 +84,8 @@ the QEMU boot test, and uploads all images, manifests, build metadata, and
 `SHA256SUMS`. For example:
 
 ```sh
-git tag -a firmware-v25.12.6-r1 -m "PassWall Plus OpenWrt 25.12.6 r1"
-git push origin firmware-v25.12.6-r1
+git tag -a firmware-v25.12.6-r2 -m "PassWall Plus OpenWrt 25.12.6 r2"
+git push origin firmware-v25.12.6-r2
 ```
 
 The release also includes the built `luci-app-passwall`, `luci-app-passwall-ezcnet`,

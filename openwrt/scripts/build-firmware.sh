@@ -56,22 +56,23 @@ copy_built_package() {
 	local candidate
 	local package_file=''
 
+	# Require the numeric version boundary; passwall-ezcnet shares passwall's prefix.
 	while IFS= read -r -d '' candidate; do
 		if [ -z "${package_file}" ] || [ "${candidate}" -nt "${package_file}" ]; then
 			package_file=${candidate}
 		fi
 	done < <(find "${SDK_DIR}/bin/packages/${OPENWRT_ARCH}" -type f \
-		-name "${package}-*.apk" -print0)
+		-name "${package}-[0-9]*.apk" -print0)
 	if [ -z "${package_file}" ]; then
 		echo "error: SDK did not produce ${package}" >&2
 		exit 1
 	fi
 	find "${IMAGEBUILDER_DIR}/packages" -maxdepth 1 -type f \
-		-name "${package}-*.apk" -delete
+		-name "${package}-[0-9]*.apk" -delete
 	cp --force "${package_file}" "${IMAGEBUILDER_DIR}/packages/"
 	case "${package}" in
 		luci-app-passwall|luci-app-passwall-ezcnet|luci-i18n-passwall-zh-cn)
-			find "${DIST_DIR}" -maxdepth 1 -type f -name "${package}-*.apk" -delete
+			find "${DIST_DIR}" -maxdepth 1 -type f -name "${package}-[0-9]*.apk" -delete
 			cp --force "${package_file}" "${DIST_DIR}/"
 			;;
 	esac

@@ -4,7 +4,7 @@ PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/O
 
 当前源码版本：`26.10.29-r2`，云控插件：`0.2.0-r1`
 
-本轮同步上游至 `cde9833e`（PassWall `26.10.29`），包含核心更新校验、节点筛选界面、DNS/规则与 Xray 配置修复。专属固件 `25.12.6-r1` 使用 Xray `26.10.31`、Go `1.27.3` 和 Sing-box `1.14.4`，并默认禁用内核 MPTCP，以缓解近期 IPv4 MPTCP 监听漏洞。固件基线同步到 OpenWrt `25.12.6` / Linux `6.12.112`，包含新版 Web/TLS 等组件的安全修复；MPTCP 继续禁用作为额外缓解措施。
+本轮同步上游至 `cde9833e`（PassWall `26.10.29`），包含核心更新校验、节点筛选界面、DNS/规则与 Xray 配置修复。专属固件 `25.12.6-r2` 使用 Xray `26.10.31`、Go `1.27.3` 和 Sing-box `1.14.4`，并默认禁用内核 MPTCP，以缓解近期 IPv4 MPTCP 监听漏洞。固件基线同步到 OpenWrt `25.12.6` / Linux `6.12.112`，包含新版 Web/TLS 等组件的安全修复；MPTCP 继续禁用作为额外缓解措施。
 
 > 仓库名称为 `passwall-plus`。为兼容现有 OpenWrt 软件包、LuCI 路径、UCI 配置和升级流程，内部包名继续使用 `luci-app-passwall`，配置仍位于 `/etc/config/passwall`。
 

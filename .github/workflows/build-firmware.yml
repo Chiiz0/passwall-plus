@@ -30,6 +30,9 @@ jobs:
       - name: Verify protected service lifecycle
         run: python3 openwrt/tests/test-switch-lifecycle.py
 
+      - name: Verify release package selection
+        run: python3 openwrt/tests/test-package-copy.py
+
       - name: Verify EzCNet command validation
         run: lua5.1 openwrt/tests/test-ezcnet.lua
 
