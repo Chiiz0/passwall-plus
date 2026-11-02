@@ -10,6 +10,7 @@ source "${OPENWRT_DIR}/versions.env"
 
 DIST_DIR=${FIRMWARE_OUTPUT_DIR:-"${REPO_ROOT}/dist/openwrt/${OPENWRT_VERSION}"}
 SSH_PORT=${QEMU_SSH_PORT:-2222}
+PROBE_PORT=${QEMU_PROBE_PORT:-2233}
 TEST_DIR=$(mktemp -d -t passwall-plus-qemu.XXXXXX)
 PID_FILE="${TEST_DIR}/qemu.pid"
 SERIAL_LOG="${TEST_DIR}/serial.log"
@@ -55,6 +56,8 @@ qemu-system-x86_64 \
 	-device e1000,netdev=lan,mac=52:54:00:00:00:10 \
 	-netdev 'user,id=wan,net=10.77.0.0/24,dhcpstart=10.77.0.15' \
 	-device e1000,netdev=wan,mac=52:54:00:00:00:20 \
+	-netdev "socket,id=probe,udp=127.0.0.1:$((PROBE_PORT + 1)),localaddr=127.0.0.1:${PROBE_PORT}" \
+	-device e1000,netdev=probe,mac=52:54:00:00:00:40 \
 	-display none \
 	-monitor none \
 	-serial "file:${SERIAL_LOG}" \
@@ -126,6 +129,11 @@ apk info -e sing-box
 test -x /usr/sbin/openvpn
 test -x /usr/bin/xray
 test -x /usr/bin/sing-box
+xray version | grep -q 'Xray 26.10.31'
+xray version | grep -q 'go1.27.3'
+if [ -e /proc/sys/net/mptcp/enabled ]; then
+	test "$(sysctl -n net.mptcp.enabled)" = 0
+fi
 pgrep -f uhttpd >/dev/null
 
 # Finish the delayed first-boot startup before changing any test configuration.
@@ -272,3 +280,4 @@ EOF
 
 # Reference migration tests use an isolated UCI directory in the disposable VM.
 ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua < "${OPENWRT_DIR}/tests/test-ezcnet-catalog.lua"
+python3 "${OPENWRT_DIR}/tests/test-switch-guard.py" "${SSH_PORT}" "${PROBE_PORT}"

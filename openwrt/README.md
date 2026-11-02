@@ -1,7 +1,7 @@
 # PassWall Plus Dedicated OpenWrt Firmware
 
 This directory builds a reproducible x86/64 firmware from the official OpenWrt
-25.12.5 SDK and ImageBuilder. It does not inherit Kwrt's rolling package feeds,
+25.12.6 SDK and ImageBuilder. It does not inherit Kwrt's rolling package feeds,
 fullcone patches, or custom miniupnp packages.
 
 ## Included behavior
@@ -11,6 +11,8 @@ fullcone patches, or custom miniupnp packages.
   with no embedded device Key; the default HTTPS endpoint is passwall.ezcnet.com.
 - Global and per-device OpenVPN, including Xray/Sing-box pre-proxy nodes.
 - DHCP static lease and IP/MAC binding support from PassWall Plus.
+- Network protection during node switches, including failed startup and core updates.
+- Kernel MPTCP disabled as a mitigation for the IPv4 MPTCP listener vulnerability.
 - `eth0` as LAN at `10.0.0.1/24`; `eth1` as DHCP WAN.
 - IPv6 disabled in sysctl and network services, plus an explicit LAN reject rule.
 - VMware e1000/e1000e/vmxnet3 drivers and the official x86 kernel's virtio support.
@@ -30,17 +32,17 @@ On Debian or Ubuntu, install the normal OpenWrt SDK dependencies plus `zstd`,
 ./openwrt/scripts/build-firmware.sh
 ```
 
-The output is written to `dist/openwrt/25.12.5/`. Downloads and extracted build
-trees are cached under `.cache/openwrt/25.12.5/`. Override these locations with
+The output is written to `dist/openwrt/25.12.6/`. Downloads and extracted build
+trees are cached under `.cache/openwrt/25.12.6/`. Override these locations with
 `PASSWALL_BUILD_CACHE` and `FIRMWARE_OUTPUT_DIR` when needed.
 
 All upstream archives are checked against the SHA-256 values in `versions.env`.
-The official SDK already pins every OpenWrt feed to the 25.12.5 release commit;
+The official SDK already pins every OpenWrt feed to the 25.12.6 release commit;
 the PassWall package feed is pinned separately. The local PassWall Plus checkout
 is linked into the SDK so the firmware always contains the source being built.
 Only the Go build tooling is backported from a separately pinned OpenWrt packages
-commit, with Go 1.27 selected for Xray 26.10. Target package feeds and the firmware
-kernel remain on the 25.12.5 baseline. Both pins are recorded in `build-info.txt`.
+commit, with Go 1.27.3 selected for Xray 26.10.31. Target package feeds and the firmware
+kernel remain on the 25.12.6 baseline. Both pins are recorded in `build-info.txt`.
 
 ## Test
 
@@ -58,13 +60,20 @@ It also compiles the installed Lua sources, renders authenticated LuCI global,
 OpenVPN-node and ACL pages, verifies global OpenVPN supervision and fail-closed
 routing with an unreachable test server, and checks managed DHCP leases and
 IP/MAC guard creation and cleanup. These checks do not establish a successful
-VPN tunnel to an external server.
+VPN tunnel to an external server. A third emulated NIC injects real LAN TCP,
+UDP, DNS and ICMP packets and verifies that no matching packets reach the WAN
+while the switch guard is active, including an established offloaded UDP flow,
+fw4 reload, guard/rule installation failures and failed core startup. The tests also verify retry recovery and explicit stop behavior.
+`QEMU_PROBE_PORT` (default 2233, also reserving the following UDP port) can be
+changed for concurrent runs. No host root privileges or external proxy account
+are needed.
 
 The Plus self-updater's version selection and rejection of upstream package URLs
 can be tested separately with Python 3 and Lua 5.1:
 
 ```sh
 python3 openwrt/tests/test-updater.py
+python3 openwrt/tests/test-switch-lifecycle.py
 ```
 
 ## GitHub releases
@@ -75,8 +84,8 @@ the QEMU boot test, and uploads all images, manifests, build metadata, and
 `SHA256SUMS`. For example:
 
 ```sh
-git tag -a firmware-v25.12.5-r1 -m "PassWall Plus OpenWrt 25.12.5 r1"
-git push origin firmware-v25.12.5-r1
+git tag -a firmware-v25.12.6-r1 -m "PassWall Plus OpenWrt 25.12.6 r1"
+git push origin firmware-v25.12.6-r1
 ```
 
 The release also includes the built `luci-app-passwall`, `luci-app-passwall-ezcnet`,

@@ -2,9 +2,12 @@
 
 START=99
 STOP=15
+EXTRA_COMMANDS="stop_for_update"
+EXTRA_HELP="\tstop_for_update Stop processes while retaining the node switch guard"
 
 ROOT="${IPKG_INSTROOT:-}"
 . "$ROOT/usr/share/passwall/utils.sh"
+. "$ROOT/usr/share/passwall/switch_guard.sh"
 APP_FILE=${APP_PATH}/app.sh
 LOCK_FILE=${LOCK_PATH}/${CONFIG}.lock
 
@@ -27,6 +30,7 @@ unset_lock() {
 
 boot_func() {
 	rm -f ${LOCK_PATH}/${CONFIG}_ready.lock
+	switch_guard_begin || return 1
 	local delay=$(uci -q get ${CONFIG}.@global_delay[0].start_delay || echo 1)
 	if [ "$delay" -gt 0 ]; then
 		echolog "执行启动延时 $delay 秒后再启动!"
@@ -43,19 +47,36 @@ boot() {
 start() {
 	set_lock || { echolog "脚本已经在运行，不重复运行，退出."; return 0; }
 	"$APP_FILE" start "$2" 9>&-
+	local status=$?
 	unset_lock
+	return "$status"
 }
 
 stop() {
 	set_lock_wait || { echolog "无法取得停止锁，退出."; return 1; }
 	"$APP_FILE" stop "$2" 9>&-
+	local status=$?
+	# An explicit stop is an intentional return to the normal network policy.
+	[ "$status" -ne 0 ] || switch_guard_end || status=1
 	unset_lock
+	return "$status"
+}
+
+stop_for_update() {
+	set_lock_wait || return 1
+	local status=1
+	if switch_guard_begin; then
+		"$APP_FILE" stop 9>&-
+		status=$?
+	fi
+	unset_lock
+	return "$status"
 }
 
 restart() {
 	local action=${2:-$1}
 	[ "$action" = "restart" ] && action=
-	set_lock || { echolog "脚本已经在运行，不重复运行，退出."; return 0; }
+	set_lock_wait || { echolog "无法取得重启锁，退出."; return 1; }
 	local update_status=1
 	for i in $(seq 1 300); do
 		PASSWALL_UPDATE_LOCK="${LOCK_PATH}/${CONFIG}_sub_rule.lock" lua -e '
@@ -73,9 +94,18 @@ restart() {
 		unset_lock
 		return 1
 	fi
+	if ! switch_guard_begin; then
+		unset_lock
+		return 1
+	fi
 	"$APP_FILE" stop "$action" 9>&-
-	"$APP_FILE" start "$action" 9>&-
+	local status=$?
+	if [ "$status" -eq 0 ]; then
+		"$APP_FILE" start "$action" 9>&-
+		status=$?
+	fi
 	unset_lock
+	return "$status"
 }
 
 reload() {

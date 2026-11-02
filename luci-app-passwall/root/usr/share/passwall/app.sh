@@ -8,6 +8,7 @@
 . /usr/share/libubox/jshn.sh
 
 . /usr/share/passwall/utils.sh
+. /usr/share/passwall/switch_guard.sh
 GLOBAL_ACL_PATH=${TMP_ACL_PATH}/default
 LUA_UTIL_PATH=/usr/lib/lua/luci/passwall
 UTIL_SINGBOX=$LUA_UTIL_PATH/util_sing-box.lua
@@ -1854,12 +1855,14 @@ sync_device_policies() {
 }
 
 start() {
+	switch_guard_begin || return 1
 	busybox pgrep -f ${TMP_PATH}/bin > /dev/null 2>&1 && {
 		logger -t PSW-RESTART "Upgrade or overload residue is detected, and the subprocess is being called to perform complete cleaning..."
 		(stop "$1")
 		sleep 2
 	}
 	mkdir -p /tmp/etc /tmp/log $TMP_PATH $TMP_BIN_PATH $TMP_SCRIPT_FUNC_PATH $TMP_ROUTE_PATH $TMP_ACL_PATH $TMP_PATH2
+	rm -f "$TMP_PATH/firewall_ready" "$TMP_PATH/firewall_error"
 	sync_device_policies
 	set_cache_var "LOCAL_DNS" "$LOCAL_DNS"
 	get_config
@@ -1894,12 +1897,12 @@ start() {
 		mkdir -p ${GLOBAL_ACL_PATH}
 		start_global || {
 			echolog "全局节点启动失败，停止服务。"
-			stop
+			(stop)
 			return 1
 		}
 		start_dns || {
 			echolog "DNS 启动失败，停止服务。"
-			stop
+			(stop)
 			return 1
 		}
 	}
@@ -1916,6 +1919,13 @@ start() {
 		}
 	fi
 
+	if switch_guard_active; then
+		if ! switch_guard_ready; then
+			echolog "节点进程或防火墙未就绪，切换保护保持阻断。请修复配置后重试；主动停止服务可解除保护。"
+			return 1
+		fi
+		switch_guard_end || return 1
+	fi
 	start_crontab "$1"
 	echolog "运行完成！\n"
 

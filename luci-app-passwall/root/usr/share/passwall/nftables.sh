@@ -1072,7 +1072,7 @@ filter_server_port() {
 	local port=$(echo "$2" | tr ':' '-' | tr -d ' ')
 	local stream=$(echo "$3" | tr 'A-Z' 'a-z')
 	local _is_tproxy="$4"
-	local _ip_type _port_expr _ver
+	local _ip_type _port_expr _ver resolved
 	local _nft_output_chain="PSW_OUTPUT_NAT"
 	[ "$stream" = "udp" ] && _is_tproxy="TPROXY"
 	[ -n "$_is_tproxy" ] && _nft_output_chain="PSW_OUTPUT_MANGLE"
@@ -1081,10 +1081,12 @@ filter_server_port() {
 		*)   _port_expr="$port" ;;
 	esac
 	for _ver in 4 6; do
+		resolved=$(get_host_ip "ipv${_ver}" "$address")
+		[ -n "$resolved" ] || continue
 		[ "$_ver" = "4" ] && _ip_type="ip"
 		[ "$_ver" = "6" ] && _ip_type="ip6" && _nft_output_chain="PSW_OUTPUT_MANGLE_V6"
 		nft list chain "$NFTABLE_NAME" "$_nft_output_chain" 2>/dev/null | grep -q "comment \"${address}:${port}:${stream}\"" || \
-		nft insert rule "$NFTABLE_NAME" "$_nft_output_chain" meta l4proto "$stream" $_ip_type daddr "$address" "$stream" dport $_port_expr return comment "\"${address}:${port}:${stream}\"" 2>/dev/null
+		nft insert rule "$NFTABLE_NAME" "$_nft_output_chain" meta l4proto "$stream" $_ip_type daddr "$resolved" "$stream" dport $_port_expr return comment "\"${address}:${port}:${stream}\"" 2>/dev/null
 	done
 }
 
@@ -1731,7 +1733,11 @@ add_firewall_rule() {
 		done
 	}
 
-	filter_direct_node_list > /dev/null 2>&1 &
+	if [ -s /tmp/passwall_switch_guard ]; then
+		filter_direct_node_list > /dev/null 2>&1
+	else
+		filter_direct_node_list > /dev/null 2>&1 &
+	fi
 
 	nft "insert rule $NFTABLE_NAME mangle_output meta skgid $DIRECT_GID counter return comment \"PSW_DIRECT\""
 	nft "insert rule $NFTABLE_NAME nat_output meta skgid $DIRECT_GID counter return comment \"PSW_DIRECT\""
@@ -1836,8 +1842,13 @@ gen_include() {
 
 start() {
 	[ "$ENABLED_DEFAULT_ACL" = 0 ] && [ "$ENABLED_ACLS" = 0 ] && [ "$GLOBAL_OPENVPN" != 1 ] && [ "$REJECT_IPV6" != 1 ] && return
+	if command -v switch_guard_nft_command >/dev/null 2>&1; then
+		nft() { switch_guard_nft_command "$@"; }
+	fi
 	add_firewall_rule
+	unset -f nft
 	gen_include
+	[ -f "$TMP_PATH/firewall_error" ] || touch "$TMP_PATH/firewall_ready"
 }
 
 stop() {

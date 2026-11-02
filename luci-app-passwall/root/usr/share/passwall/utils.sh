@@ -160,13 +160,43 @@ get_host_ip() {
 	if [ "$1" = "ipv6" ]; then
 		host=${host#[}
 		host=${host%]}
+		printf '%s' "$host" | grep -qE "^($IPv4_REGEX)$" && return 1
 		isip=$(printf '%s' "$host" | grep -E "^($IPv6_REGEX)$")
 		[ -n "$isip" ] && ip=$isip
 	else
+		case "$host" in *:*) return 1 ;; esac
 		isip=$(printf '%s' "$host" | grep -E "^($IPv4_REGEX)$")
 		[ -n "$isip" ] && ip=$isip
 	fi
 	[ -z "$isip" ] && {
+		if [ -s /tmp/passwall_switch_guard ]; then
+			# The system resolver is blocked during transitions. Only the startup
+			# process group may resolve the node's bootstrap hostname upstream.
+			case "$host" in ''|-*|*[!A-Za-z0-9_.-]*) return 1 ;; esac
+			local rr=1 query=A response candidate resolver
+			[ "$1" = ipv6 ] && { rr=28; query=AAAA; }
+			resolver=$(awk '$1 == "nameserver" && $2 !~ /^(127\.|::1$)/ {print $2; exit}' /tmp/resolv.conf.d/resolv.conf.auto 2>/dev/null)
+			[ -n "$resolver" ] || resolver=223.5.5.5
+			response=$(run_as_direct_gid timeout 4 nslookup -type="$query" "$host" "$resolver" 2>/dev/null)
+			for candidate in $(printf '%s\n' "$response" | awk '/^Name:/ {answer=1} answer && /^Address/ {print $NF}'); do
+				if [ "$rr" = 1 ]; then
+					printf '%s\n' "$candidate" | grep -E "^($IPv4_REGEX)$" && return 0
+				else
+					printf '%s\n' "$candidate" | grep -E "^($IPv6_REGEX)$" && return 0
+				fi
+			done
+			response=$(run_as_direct_gid curl -4 -fsS --connect-timeout 3 --max-time 5 \
+				-H 'accept: application/dns-json' \
+				"https://1.1.1.1/dns-query?name=${host}&type=${rr}" 2>/dev/null) || return 1
+			for candidate in $(printf '%s' "$response" | jsonfilter -e "@.Answer[@.type=${rr}].data"); do
+				if [ "$rr" = 1 ]; then
+					printf '%s\n' "$candidate" | grep -E "^($IPv4_REGEX)$" && return 0
+				else
+					printf '%s\n' "$candidate" | grep -E "^($IPv6_REGEX)$" && return 0
+				fi
+			done
+			return 1
+		fi
 		local t=4
 		[ "$1" = "ipv6" ] && t=6
 		local vpsrip=$(resolveip -$t -t "$count" "$host" | awk 'NR==1{print}')
@@ -461,6 +491,17 @@ get_process_start_time() {
 	sed 's/.*) //' "/proc/$1/stat" 2>/dev/null | awk '{print $20}'
 }
 
+run_as_direct_gid() {
+	local command="exec" arg
+	for arg in "$@"; do command="$command $(shell_quote "$arg")"; done
+	PASSWALL_GID_COMMAND="$command" lua -e '
+		local nixio = require "nixio"
+		if not nixio.setgid(9911) then os.exit(1) end
+		nixio.exec("/bin/sh", "-c", os.getenv("PASSWALL_GID_COMMAND"))
+		os.exit(127)
+	'
+}
+
 ln_run() {
 	local file_func=${1}
 	local ln_name=${2}
@@ -484,7 +525,13 @@ ln_run() {
 		return 1
 	}
 
-	"$file_func" "$@" >"$output" 2>&1 &
+	# Grant upstream access only to the network workers. Configuration generation
+	# and ubus calls retain root's primary group and normal OpenWrt ACL identity.
+	if [ -s /tmp/passwall_switch_guard ]; then
+		run_as_direct_gid "$file_func" "$@" >"$output" 2>&1 &
+	else
+		"$file_func" "$@" >"$output" 2>&1 &
+	fi
 	local pid=$!
 
 	[ "$NO_REC_PROCESS" = "1" ] && return

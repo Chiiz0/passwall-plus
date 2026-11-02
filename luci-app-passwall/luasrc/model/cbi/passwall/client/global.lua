@@ -608,6 +608,10 @@ else
 	end
 end
 
+o = s:taboption("Proxy", Flag, "switch_guard", translate("Protect network during node switches"), translate("Pause forwarded traffic, client DNS and ordinary router traffic during startup and node switches. Management replies and proxy bootstrap remain available. If startup fails, keep blocking until a successful retry or an explicit service stop. Applies to all devices, including direct ACLs, during the transition."))
+o.default = "1"
+o.rmempty = false
+
 o = s:taboption("Proxy", DummyValue, "_proxy_tips", "　")
 o.rawhtml = true
 o.cfgvalue = function(t, n)

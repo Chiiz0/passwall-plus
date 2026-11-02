@@ -94,12 +94,16 @@ printf 'src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-pa
 printf 'src-link passwall_plus %s\n' "${REPO_ROOT}" >> feeds.conf.passwall-plus
 mv feeds.conf.passwall-plus feeds.conf.default
 ./scripts/feeds update base packages luci passwall_packages passwall_plus
-# Xray 26.10 requires Go 1.27; 25.12.5's target package feeds stay unchanged.
+# Xray 26.10 requires Go 1.27; 25.12.6's target package feeds stay unchanged.
 git -C feeds/packages fetch --depth=1 --no-tags https://github.com/openwrt/packages.git \
 	"${OPENWRT_GOLANG_COMMIT}"
 git -C feeds/packages restore --source="${OPENWRT_GOLANG_COMMIT}" --worktree -- lang/golang
 sed -i "s/^GO_DEFAULT_VERSION:=.*/GO_DEFAULT_VERSION:=${OPENWRT_GOLANG_VERSION}/" \
 	feeds/packages/lang/golang/golang-values.mk
+# Verify the exact security baseline rather than recording only the Go series.
+grep -q "^GO_VERSION_PATCH:=${OPENWRT_GOLANG_PATCH_VERSION##*.}$" \
+	"feeds/packages/lang/golang/golang${OPENWRT_GOLANG_VERSION}/Makefile"
+grep -q "^PKG_VERSION:=${XRAY_VERSION}$" feeds/passwall_packages/xray-core/Makefile
 # The feed scanner caches leaf Makefiles and can miss changes in included .mk files.
 rm -rf -- feeds/packages.tmp
 ./scripts/feeds update -i packages
@@ -169,7 +173,8 @@ OpenWrt: ${OPENWRT_VERSION} ${OPENWRT_REVISION}
 Kernel: ${OPENWRT_KERNEL}
 Target: ${OPENWRT_TARGET}/${OPENWRT_SUBTARGET} (${OPENWRT_ARCH})
 PassWall packages feed: ${PASSWALL_PACKAGES_COMMIT}
-Go build tooling: ${OPENWRT_GOLANG_COMMIT} (Go ${OPENWRT_GOLANG_VERSION})
+Go build tooling: ${OPENWRT_GOLANG_COMMIT} (Go ${OPENWRT_GOLANG_PATCH_VERSION})
+Xray: ${XRAY_VERSION}
 PassWall Plus source: $(git -C "${REPO_ROOT}" rev-parse HEAD)
 Rootfs partition: ${ROOTFS_PARTSIZE} MiB
 EOF

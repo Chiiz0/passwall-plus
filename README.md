@@ -2,15 +2,15 @@
 
 PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/Openwrt-Passwall/openwrt-passwall) 的增强分支，重点解决局域网设备身份绑定、按设备选择出口、明确拒绝 IPv6，以及全局和单设备 OpenVPN 全流量转发。
 
-当前源码版本：`26.10.22-r4`，云控插件：`0.2.0-r1`
+当前源码版本：`26.10.29-r2`，云控插件：`0.2.0-r1`
 
-本轮同步上游至 `4b74bdd7`（2026-10-24），吸收节点列表排序与筛选、DNS/订阅修复和下载 SHA-256 校验，同时保留 Plus 的设备绑定与 OpenVPN 功能。专属固件继续使用 OpenWrt `25.12.5`，代理核心更新为 Xray `26.10.21`、Sing-box `1.14.4`。
+本轮同步上游至 `cde9833e`（PassWall `26.10.29`），包含核心更新校验、节点筛选界面、DNS/规则与 Xray 配置修复。专属固件 `25.12.6-r1` 使用 Xray `26.10.31`、Go `1.27.3` 和 Sing-box `1.14.4`，并默认禁用内核 MPTCP，以缓解近期 IPv4 MPTCP 监听漏洞。固件基线同步到 OpenWrt `25.12.6` / Linux `6.12.112`，包含新版 Web/TLS 等组件的安全修复；MPTCP 继续禁用作为额外缓解措施。
 
 > 仓库名称为 `passwall-plus`。为兼容现有 OpenWrt 软件包、LuCI 路径、UCI 配置和升级流程，内部包名继续使用 `luci-app-passwall`，配置仍位于 `/etc/config/passwall`。
 
 ## 专属 OpenWrt 固件
 
-仓库现在包含基于官方 OpenWrt `25.12.5` 的可复现 x86/64 固件构建。它固定官方 SDK、ImageBuilder、全部 OpenWrt feed 及 PassWall 依赖 feed，不使用 Kwrt 的滚动软件源、fullcone 改动或自定义 miniupnp 包。
+仓库现在包含基于官方 OpenWrt `25.12.6` 的可复现 x86/64 固件构建。它固定官方 SDK、ImageBuilder、全部 OpenWrt feed 及 PassWall 依赖 feed，不使用 Kwrt 的滚动软件源、fullcone 改动或自定义 miniupnp 包。
 
 成品固件直接包含 PassWall Plus、OpenVPN、Xray、Sing-box、LuCI 简体中文和 VMware/QEMU 驱动，并生成 BIOS/UEFI、ext4/squashfs 及 VMware VMDK 镜像。默认双网卡定义为：
 
@@ -54,6 +54,7 @@ Release 还提供与该固件匹配的 LuCI 主程序和简体中文 APK。Plus 
 | IPv6 明确拒绝 | 默认拒绝来自 `lan` 区域的 IPv6，不允许通过 IPv6 绕过设备策略 |
 | 全局 OpenVPN | 可将全部 LAN 客户端和路由器本机的 TCP、UDP、ICMP、DNS 接入同一 TUN 隧道 |
 | 单设备 OpenVPN | 可为指定设备选择独立 OpenVPN 节点和策略路由表，不影响其他设备 |
+| 节点切换保护 | 启动、重启、切换节点和在线替换核心时先阻断网络，进程与规则就绪后恢复；失败时保持阻断 |
 | OpenVPN 防回落 | 隧道未建立或意外断开时保持阻断，不会静默切回 WAN |
 | OpenVPN 前置代理 | 可通过普通 Xray 或 Sing-box 节点提供的本机 SOCKS 连接 VPN 服务端 |
 | LAN 访问控制 | 可按设备决定使用 OpenVPN 时是否保留本地 LAN 访问 |
@@ -70,6 +71,16 @@ Release 还提供与该固件匹配的 LuCI 主程序和简体中文 APK。Plus 
 | OpenVPN 节点 | 设备专属策略路由表和 TUN | 阻断公网，防止回落 | 拒绝 |
 
 每个启用绑定的访问控制条目应只表示一台设备。保存配置后，应让客户端重新获取 DHCP 租约，使其使用绑定的 IPv4 地址。
+
+## 节点切换网络保护
+
+基本设置 → 代理中的“节点切换网络保护”默认开启，已有配置缺少该选项时也默认生效。切换前先安装独立的防火墙保护，随后停止旧节点、启动新节点；确认核心进程存活、代理与 DNS 端口监听、代理规则安装成功后才解除保护。LuCI、订阅更新、云控触发的服务重启都走同一流程，在线替换核心也会保留保护。
+
+切换期间所有设备（包括直连 ACL）的转发流量、客户端 DNS 和普通路由器出网会短暂停顿。管理连接的应答、DHCP/IPv6 邻居发现及代理启动连接仍可使用。启动需要解析节点域名时，仅由启动进程向上游 DNS 或 HTTPS DNS 发起引导解析；不会放行普通应用的直连 DNS。保护覆盖 IPv4/IPv6，独立于普通代理规则，并清理可能绕过转发链的流量卸载缓存。
+
+如果配置错误、核心退出或防火墙规则安装失败，保护会继续阻断。修复配置后重新启动即可恢复；主动点击停止或执行 `/etc/init.d/passwall stop` 表示允许恢复系统网络。保护安装失败时会取消重启，不先拆除现有代理。nftables/firewall4 使用标准 fw4 流量卸载表；遇到其他自定义卸载表会取消切换。fw3 开启流量卸载时需要安装 `conntrack`，否则取消切换。
+
+这是切换过程的保护，不改变正常运行时的分流或直连策略，也不替代 OpenVPN 已有的持续断线防回落。
 
 ## OpenVPN 集成
 
@@ -207,7 +218,7 @@ ip -4 route show table all
 
 - firewall4 环境会优先识别真实 `fw4` 后端，不会被某些固件提供的 `/sbin/fw3 -> fw4` 兼容链接误导。
 - 部分第三方 Kwrt 快照中的 `nft 1.1.6` 可能在执行 `fw4 reload` 时段错误。该问题在停止 PassWall 并删除 `inet passwall` 表后仍可复现，属于固件的 nftables/firewall4 基线问题；建议更新固件或相关组件。
-- 本仓库的专属固件使用 OpenWrt 25.12.5 官方 firewall4/nftables 构建组合，QEMU 实测 `fw4 reload` 正常且 `dmesg` 无崩溃，可直接作为该 Kwrt 问题的替代方案。
+- 本仓库的专属固件使用 OpenWrt 25.12.6 官方 firewall4/nftables 构建组合，QEMU 实测 `fw4 reload` 正常且 `dmesg` 无崩溃，可直接作为该 Kwrt 问题的替代方案。
 - IPv6 拒绝区域默认是 `lan`，多 LAN 或自定义防火墙区域应在 PassWall 全局配置中明确加入。
 
 ## 上游与许可证

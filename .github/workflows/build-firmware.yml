@@ -27,6 +27,9 @@ jobs:
       - name: Verify Plus updater
         run: python3 openwrt/tests/test-updater.py
 
+      - name: Verify protected service lifecycle
+        run: python3 openwrt/tests/test-switch-lifecycle.py
+
       - name: Verify EzCNet command validation
         run: lua5.1 openwrt/tests/test-ezcnet.lua
 
@@ -39,8 +42,8 @@ jobs:
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
-          name: passwall-plus-openwrt-25.12.5-x86-64
-          path: dist/openwrt/25.12.5/
+          name: passwall-plus-openwrt-25.12.6-x86-64
+          path: dist/openwrt/25.12.6/
           if-no-files-found: error
           retention-days: 14
 
@@ -50,9 +53,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           release_version="${GITHUB_REF_NAME#firmware-v}"
+          notes=(--generate-notes)
+          if [ -f "openwrt/releases/${release_version}.md" ]; then
+            notes=(--notes-file "openwrt/releases/${release_version}.md")
+          fi
           gh release create "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
             --verify-tag \
-            --generate-notes \
+            "${notes[@]}" \
             --title "PassWall Plus OpenWrt ${release_version}" \
-            dist/openwrt/25.12.5/*
+            dist/openwrt/25.12.6/*

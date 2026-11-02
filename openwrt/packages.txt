@@ -33,6 +33,7 @@ kmod-tun
 kmod-nf-reject
 kmod-nf-reject6
 kmod-nft-nat
+kmod-nft-fib
 kmod-nft-socket
 kmod-nft-tproxy
 

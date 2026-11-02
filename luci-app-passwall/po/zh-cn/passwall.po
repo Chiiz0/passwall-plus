@@ -2159,3 +2159,12 @@ msgstr "显示全部行"
 
 msgid "The filter only hides rows on this page and changes nothing on the router. Select all skips hidden rows."
 msgstr "筛选只在本页隐藏行，不会改动路由器上的设置。全选会跳过隐藏行。"
+
+msgid "Protect network during node switches"
+msgstr "节点切换网络保护"
+
+msgid "Pause forwarded traffic, client DNS and ordinary router traffic during startup and node switches. Management replies and proxy bootstrap remain available. If startup fails, keep blocking until a successful retry or an explicit service stop. Applies to all devices, including direct ACLs, during the transition."
+msgstr "启动和切换节点期间暂停转发流量、客户端 DNS 和普通路由器出网，保留管理应答与代理启动连接。启动失败时持续阻断，直到重试成功或主动停止服务。切换期间所有设备（包括直连 ACL）均受保护。"
+
+msgid "Unable to protect the network before updating the core."
+msgstr "更新核心前无法启用网络保护，已取消更新。"

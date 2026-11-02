@@ -982,10 +982,12 @@ filter_server_port() {
 	local port=$(echo "$2" | tr '-' ':' | tr -d ' ')
 	local stream=$(echo "$3" | tr 'A-Z' 'a-z')
 	local _is_tproxy="$4"
-	local ipt_tmp="$ipt_n" _ipt_cmd _ver multi_ports p ports
+	local ipt_tmp="$ipt_n" _ipt_cmd _ver multi_ports p ports resolved
 	[ "$stream" = "udp" ] && _is_tproxy="TPROXY"
 	[ -n "$_is_tproxy" ] && ipt_tmp="$ipt_m"
 	for _ver in 4 6; do
+		resolved=$(get_host_ip "ipv${_ver}" "$address")
+		[ -n "$resolved" ] || continue
 		[ "$_ver" = "4" ] && _ipt_cmd="$ipt_tmp"
 		[ "$_ver" = "6" ] && _ipt_cmd="$ip6t_m"
 		multi_ports=""
@@ -993,7 +995,7 @@ filter_server_port() {
 			case "$p" in
 				*:* )
 					$_ipt_cmd -n -L PSW_OUTPUT 2>/dev/null | grep -q "${address}:${p}:${stream}" || \
-					$_ipt_cmd -I PSW_OUTPUT $(comment "${address}:${p}:${stream}") -p "$stream" -d "$address" --dport "$p" -j RETURN 2>/dev/null
+					$_ipt_cmd -I PSW_OUTPUT $(comment "${address}:${p}:${stream}") -p "$stream" -d "$resolved" --dport "$p" -j RETURN 2>/dev/null
 					;;
 				* )
 					multi_ports="${multi_ports},$p"
@@ -1003,7 +1005,7 @@ filter_server_port() {
 		if [ -n "$multi_ports" ]; then
 			ports=$(printf "%s\n" "${multi_ports#,}" | tr ',' '\n' | sort -n | tr '\n' ',' | sed 's/,$//')
 			$_ipt_cmd -n -L PSW_OUTPUT 2>/dev/null | grep -q "${address}:${ports}:${stream}" || \
-			$_ipt_cmd -I PSW_OUTPUT $(comment "${address}:${ports}:${stream}") -p "$stream" -d "$address" -m multiport --dports "$ports" -j RETURN 2>/dev/null
+			$_ipt_cmd -I PSW_OUTPUT $(comment "${address}:${ports}:${stream}") -p "$stream" -d "$resolved" -m multiport --dports "$ports" -j RETURN 2>/dev/null
 		fi
 	done
 }
@@ -1624,7 +1626,11 @@ add_firewall_rule() {
 	$ipt_n -I PREROUTING $(comment "PSW") -m mark --mark ${FWMARK} -j RETURN
 	$ip6t_n -I PREROUTING $(comment "PSW") -m mark --mark ${FWMARK} -j RETURN
 
-	filter_direct_node_list > /dev/null 2>&1 &
+	if [ -s /tmp/passwall_switch_guard ]; then
+		filter_direct_node_list > /dev/null 2>&1
+	else
+		filter_direct_node_list > /dev/null 2>&1 &
+	fi
 
 	local direct_ipt
 	for direct_ipt in "$ipt_n" "$ipt_m" "$ip6t_n" "$ip6t_m"; do
@@ -1799,8 +1805,25 @@ get_ip6t_bin() {
 
 start() {
 	[ "$ENABLED_DEFAULT_ACL" = 0 ] && [ "$ENABLED_ACLS" = 0 ] && [ "$GLOBAL_OPENVPN" != 1 ] && [ "$REJECT_IPV6" != 1 ] && return
+	local ipt_f="$ipt_f" ipt_n="$ipt_n" ipt_m="$ipt_m"
+	local ip6t_f="$ip6t_f" ip6t_n="$ip6t_n" ip6t_m="$ip6t_m"
+	if command -v switch_guard_ipt_command >/dev/null 2>&1; then
+		ipt_f="switch_guard_ipt_command $ipt_f"
+		ipt_n="switch_guard_ipt_command $ipt_n"
+		ipt_m="switch_guard_ipt_command $ipt_m"
+		[ -z "$ip6t" ] || ip6t_f="switch_guard_ipt_command $ip6t_f"
+		case "$ip6t_n" in eval*) ;; *) ip6t_n="switch_guard_ipt_command $ip6t_n" ;; esac
+		case "$ip6t_m" in eval*) ;; *) ip6t_m="switch_guard_ipt_command $ip6t_m" ;; esac
+	fi
 	add_firewall_rule
+	ipt_f=${ipt_f#switch_guard_ipt_command }
+	ipt_n=${ipt_n#switch_guard_ipt_command }
+	ipt_m=${ipt_m#switch_guard_ipt_command }
+	ip6t_f=${ip6t_f#switch_guard_ipt_command }
+	ip6t_n=${ip6t_n#switch_guard_ipt_command }
+	ip6t_m=${ip6t_m#switch_guard_ipt_command }
 	gen_include
+	[ -f "$TMP_PATH/firewall_error" ] || touch "$TMP_PATH/firewall_ready"
 }
 
 stop() {

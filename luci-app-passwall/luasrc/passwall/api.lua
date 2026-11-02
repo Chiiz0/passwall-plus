@@ -1538,7 +1538,9 @@ function to_move(app_name,file)
 
 	local flag = sys.call('busybox pgrep -af "passwall/.*'.. app_name ..'" >/dev/null')
 	if flag == 0 then
-		sys.call("/etc/init.d/passwall stop")
+		if sys.call("/etc/init.d/passwall stop_for_update") ~= 0 then
+			return {code = 1, error = i18n.translate("Unable to protect the network before updating the core.")}
+		end
 	end
 
 	result = exec("/bin/mv", { "-f", bin_path, app_path }, nil, command_timeout) == 0
