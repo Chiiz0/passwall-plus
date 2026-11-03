@@ -116,8 +116,12 @@ for _ in $(seq 1 30); do
 done
 ubus call network.interface.wan status | grep -q '"up": true'
 
-apk info -e luci-app-passwall
-apk info -e luci-app-passwall-ezcnet
+apk info -e 'luci-app-passwall=26.10.29-r3'
+apk info -e 'luci-app-passwall-ezcnet=0.2.0-r2'
+/etc/init.d/passwall-guard enabled
+for helper in check restore stage watch; do
+	test -x "/usr/libexec/passwall-guard-$helper"
+done
 test "$(uci -q get passwall_ezcnet.main.enabled)" = '0'
 test "$(uci -q get passwall_ezcnet.main.server)" = 'https://passwall.ezcnet.com'
 test -z "$(uci -q get passwall_ezcnet.main.key)"
