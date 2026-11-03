@@ -133,6 +133,7 @@ switch_export > "$SWITCH_SAVE/last-good"
 uci set passwall.@global[0].probe_lock_case=candidate
 uci commit passwall
 switch_capture
+rm -f /tmp/native-lock-ready
 lua -e '
  local n=require "nixio"
  local f=assert(n.open("/var/lock/passwall_sub_rule.lock","a"))
@@ -141,12 +142,14 @@ lua -e '
  n.nanosleep(30, 0)
 ' &
 holder=$!
-for i in $(seq 1 30); do [ ! -e /tmp/native-lock-ready ] || break; sleep 0.1; done
+trap 'kill "$holder" 2>/dev/null || true' EXIT
+for i in $(seq 1 10); do [ ! -e /tmp/native-lock-ready ] || break; sleep 1; done
 test -e /tmp/native-lock-ready
 ! switch_restore_config
 test "$(uci get passwall.@global[0].probe_lock_case)" = candidate
 kill "$holder"
 wait "$holder" 2>/dev/null || true
+trap - EXIT
 uci set passwall.@global[0].probe_lock_case=edited
 uci commit passwall
 ! switch_restore_config
@@ -316,7 +319,8 @@ rm /tmp/passwall_switch_guard
     guest("pgrep -f '^/bin/sh /usr/libexec/passwall-guard-watch$' > /tmp/old-watch\nkill -KILL $(cat /tmp/old-watch)\n")
     wait_for("pid=$(pgrep -f '^/bin/sh /usr/libexec/passwall-guard-watch$')\ntest -n \"$pid\"\ntest \"$pid\" != \"$(cat /tmp/old-watch)\"\n", timeout=20)
     print("PASS: procd respawns recovery supervisor", flush=True)
-except (subprocess.CalledProcessError, AssertionError):
+except (subprocess.CalledProcessError, AssertionError) as error:
+    print(getattr(error, "stdout", ""), getattr(error, "stderr", ""), file=sys.stderr)
     print(guest("cat /tmp/transition.log\ntail -n 100 /tmp/log/passwall.log\n", check=False).stdout, file=sys.stderr)
     raise
 finally:
