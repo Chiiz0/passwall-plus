@@ -18,6 +18,21 @@ switch_guard_needed() {
 }
 
 switch_guard_nft() {
+	# Reject unsupported offload setups before installing a barrier. Errors after
+	# installation are handled by the lifecycle controller without dropping state.
+	local family table flow reload=0 flows
+	flows=$(timeout 5 nft list flowtables) || return 1
+	while read -r family table flow; do
+		[ -n "$flow" ] || continue
+		[ "$family/$table/$flow" = inet/fw4/ft ] || {
+			echolog "发现非 fw4 管理的流量卸载表，取消切换。"
+			return 1
+		}
+		reload=1
+	done <<EOF
+$(printf '%s\n' "$flows" | awk '$1 == "table" {family=$2; table=$3} $1 == "flowtable" {print family, table, $2}')
+EOF
+	[ "$reload" != 1 ] || timeout 5 ubus call network.interface dump >/dev/null 2>&1 || return 1
 	# One transaction, including replacement, so retrying a failed start has no gap.
 	{
 		echo 'add table inet passwall_switch'
@@ -38,33 +53,25 @@ add rule inet passwall_switch output meta mark 255 accept
 EOF
 		# Only PassWall's bootstrap/core processes may establish upstream connections.
 		printf 'add rule inet passwall_switch output meta skgid %s accept\n' "$DIRECT_GID"
+		# TLS-based recovery needs a valid clock. Only the dedicated NTP account
+		# can send time synchronization packets; ordinary clients remain blocked.
+		local ntp_uid=$(id -u ntp 2>/dev/null)
+		case "$ntp_uid" in ''|0|*[!0-9]*) ;; *)
+			printf 'add rule inet passwall_switch output meta skuid %s udp dport 123 accept\n' "$ntp_uid"
+			;;
+		esac
 		cat <<'EOF'
 add rule inet passwall_switch output udp sport 68 udp dport 67 accept
 add rule inet passwall_switch output udp sport 546 udp dport 547 accept
 add rule inet passwall_switch output icmpv6 type { nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert } accept
 add rule inet passwall_switch output counter drop
 EOF
-	} | nft -f - || return 1
+	} | timeout 10 nft -f - || return 1
 	# Cached flows bypass the forward hook. fw4 reload atomically recreates its
 	# flowtable (nft has no "flush flowtable" command). Our independent barrier
 	# remains installed and prevents new flows from reaching fw4's offload rule.
-	local family table flow reload=0
-	nft list flowtables > "${SWITCH_GUARD_STATE}.flows" || return 1
-	while read -r family table flow; do
-		[ -n "$flow" ] || continue
-		if [ "$family/$table/$flow" != inet/fw4/ft ]; then
-			echolog "发现非 fw4 管理的流量卸载表，无法保证切换保护，取消切换。"
-			return 1
-		fi
-		reload=1
-	done <<EOF
-$(awk '$1 == "table" {family=$2; table=$3} $1 == "flowtable" {print family, table, $2}' "${SWITCH_GUARD_STATE}.flows")
-EOF
-	rm -f "${SWITCH_GUARD_STATE}.flows"
 	if [ "$reload" = 1 ]; then
-		# fw4 can otherwise render empty zone devices when ubus is unavailable.
-		ubus call network.interface dump >/dev/null 2>&1 || return 1
-		fw4 reload || return 1
+		timeout 15 fw4 reload || return 1
 	fi
 	return 0
 }
@@ -85,10 +92,14 @@ switch_guard_ipt_family() {
 -A PW_SWITCH_DNS ! -i lo -p tcp --dport 53 -j DROP
 -A PW_SWITCH_OUT -o lo -j RETURN
 -A PW_SWITCH_OUT -m conntrack --ctdir REPLY -j RETURN
--A PW_SWITCH_OUT -p tcp -m multiport --sports 22,80,443 -j RETURN
 -A PW_SWITCH_OUT -m mark --mark 255 -j RETURN
 EOF
 		printf '%s\n' "-A PW_SWITCH_OUT -m owner --gid-owner $DIRECT_GID -j RETURN"
+		local ntp_uid=$(id -u ntp 2>/dev/null)
+		case "$ntp_uid" in ''|0|*[!0-9]*) ;; *)
+			printf '%s\n' "-A PW_SWITCH_OUT -m owner --uid-owner $ntp_uid -p udp --dport 123 -j RETURN"
+			;;
+		esac
 		if [ "$family" = 4 ]; then
 			echo '-A PW_SWITCH_OUT -p udp --sport 68 --dport 67 -j RETURN'
 		else
@@ -121,7 +132,7 @@ EOF
 		echo '-A PW_SWITCH_PRE -m addrtype ! --dst-type LOCAL -j DROP'
 		"$ipt" -w -t raw -C PREROUTING -j PW_SWITCH_PRE 2>/dev/null || echo '-I PREROUTING 1 -j PW_SWITCH_PRE'
 		echo COMMIT
-	} | "${ipt}-restore" -w --noflush
+	} | timeout 10 "${ipt}-restore" -w 5 --noflush
 }
 
 switch_guard_begin() {
@@ -159,30 +170,49 @@ switch_guard_begin() {
 }
 
 switch_guard_end() {
-	switch_guard_active || return 0
 	local backend ipt hook chain
-	read -r backend < "$SWITCH_GUARD_STATE"
+	if switch_guard_active; then
+		read -r backend < "$SWITCH_GUARD_STATE"
+	elif command -v fw4 >/dev/null 2>&1; then
+		backend=nft
+	else
+		backend=iptables
+	fi
 	case "$backend" in
 		nft)
-			if nft list table inet passwall_switch >/dev/null 2>&1; then
-				nft delete table inet passwall_switch || return 1
+			# Listing all tables distinguishes absence from a failed netlink query.
+			# Never lose the state marker while the real barrier might still exist.
+			local tables
+			tables=$(timeout 5 nft list tables) || return 1
+			if printf '%s\n' "$tables" | grep -q '^table inet passwall_switch$'; then
+				timeout 10 nft delete table inet passwall_switch || return 1
 			fi
+			tables=$(timeout 5 nft list tables) || return 1
+			printf '%s\n' "$tables" | grep -q '^table inet passwall_switch$' && return 1
 			;;
 		iptables)
 			for ipt in "$(command -v iptables-legacy || command -v iptables)" "$(command -v ip6tables-legacy || command -v ip6tables)"; do
 				[ -n "$ipt" ] || continue
-				while "$ipt" -w -t raw -C PREROUTING -j PW_SWITCH_PRE 2>/dev/null; do
+				[ "$ipt" != "$(command -v ip6tables-legacy || command -v ip6tables)" ] || [ -e /proc/net/if_inet6 ] || continue
+				local rules
+				rules=$("$ipt" -w 5 -t raw -S) || return 1
+				while printf '%s\n' "$rules" | grep -q '^-A PREROUTING -j PW_SWITCH_PRE$'; do
 					"$ipt" -w -t raw -D PREROUTING -j PW_SWITCH_PRE || return 1
+					rules=$("$ipt" -w 5 -t raw -S) || return 1
 				done
-				"$ipt" -w -t raw -F PW_SWITCH_PRE 2>/dev/null
-				"$ipt" -w -t raw -X PW_SWITCH_PRE 2>/dev/null
+				if printf '%s\n' "$rules" | grep -q '^-N PW_SWITCH_PRE$'; then
+					"$ipt" -w 5 -t raw -F PW_SWITCH_PRE && "$ipt" -w 5 -t raw -X PW_SWITCH_PRE || return 1
+				fi
 				for hook in FORWARD OUTPUT INPUT; do
 					case "$hook" in FORWARD) chain=PW_SWITCH_FWD ;; OUTPUT) chain=PW_SWITCH_OUT ;; INPUT) chain=PW_SWITCH_DNS ;; esac
-					while "$ipt" -w -C "$hook" -j "$chain" 2>/dev/null; do
+					rules=$("$ipt" -w 5 -S) || return 1
+					while printf '%s\n' "$rules" | grep -q "^-A $hook -j $chain\$"; do
 						"$ipt" -w -D "$hook" -j "$chain" || return 1
+						rules=$("$ipt" -w 5 -S) || return 1
 					done
-					"$ipt" -w -F "$chain" 2>/dev/null
-					"$ipt" -w -X "$chain" 2>/dev/null
+					if printf '%s\n' "$rules" | grep -q "^-N $chain\$"; then
+						"$ipt" -w 5 -F "$chain" && "$ipt" -w 5 -X "$chain" || return 1
+					fi
 				done
 			done
 			;;
@@ -198,7 +228,6 @@ switch_guard_ready() {
 	if [ "$(config_n_get @global[0] enabled 0)" = 1 ]; then
 		[ "$(get_cache_var ENABLED_DEFAULT_ACL)" = 1 ] || [ "$(get_cache_var GLOBAL_OPENVPN)" = 1 ] || return 1
 	fi
-	sleep 1
 	for file in "$TMP_SCRIPT_FUNC_PATH"/*; do
 		[ -f "$file" ] || continue
 		{ read -r pid; read -r started; } < "$file"

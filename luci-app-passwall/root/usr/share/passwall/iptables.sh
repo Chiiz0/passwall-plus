@@ -372,7 +372,10 @@ load_openvpn() {
 		[ "$has_dns_rules" = "1" ] && $ipt_n -I PREROUTING 1 $(comment "PSW_OPENVPN_DNS") -j PSW_OPENVPN_DNS
 		[ "$has_dns_output_rules" = "1" ] && $ipt_n -I OUTPUT 1 $(comment "PSW_OPENVPN_DNS_OUT") -j PSW_OPENVPN_DNS_OUT
 		[ "$has_input_rules" = "1" ] && $ipt_f -I INPUT 1 $(comment "PSW_OPENVPN") -j PSW_OPENVPN_INPUT
-		[ "$has_output_rules" = "1" ] && $ipt_f -I OUTPUT 1 $(comment "PSW_OPENVPN") -j PSW_OPENVPN_OUTPUT
+		if [ "$has_output_rules" = "1" ]; then
+			$ipt_f -I PSW_OPENVPN_OUTPUT 1 -m owner --gid-owner "$DIRECT_GID" -o pswov+ $(comment "PSW_OPENVPN_CHECK") -j ACCEPT
+			$ipt_f -I OUTPUT 1 $(comment "PSW_OPENVPN") -j PSW_OPENVPN_OUTPUT
+		fi
 		$ipt_f -I FORWARD 1 $(comment "PSW_OPENVPN") -j PSW_OPENVPN
 		echolog "  - 已加载 OpenVPN 全局/设备全流量、DNS、NAT 与防回落规则。"
 	else

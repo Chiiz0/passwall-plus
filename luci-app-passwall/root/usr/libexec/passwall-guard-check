@@ -1,0 +1,12 @@
+#!/bin/sh
+. /usr/share/passwall/utils.sh
+. /usr/share/passwall/switch_guard.sh
+. /usr/share/passwall/switch_lifecycle.sh
+if [ "$1" = runtime ]; then
+	case "$(switch_read result)" in ready|rolled_back|cancelled) ;; *) exit 0 ;; esac
+	switch_has_proxy || exit 0
+	switch_guard_ready
+	exit $?
+fi
+SWITCH_REQUEST="$1"
+switch_wait_ready "${2:-30}"

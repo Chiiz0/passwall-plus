@@ -219,14 +219,15 @@ ubus call session destroy "{\"ubus_rpc_session\":\"$session\"}" >/dev/null
 unset session
 set -x
 
-# A global tunnel must stay supervised when ordinary proxy ACLs are disabled.
-/etc/init.d/passwall restart
+# An unreachable global tunnel stays protected and independently supervised.
+! /etc/init.d/passwall restart
 . /usr/share/passwall/utils.sh
 test "$(get_cache_var GLOBAL_OPENVPN)" = 1
 test "$(get_cache_var ENABLED_DEFAULT_ACL)" = 0
 test "$(get_cache_var ENABLED_ACLS)" = 0
 sleep 2
-pgrep -f '^/bin/sh /usr/share/passwall/monitor.sh$' >/dev/null
+pgrep -f '^/bin/sh /usr/libexec/passwall-guard-watch$' >/dev/null
+test -s /tmp/passwall_switch_guard
 pgrep -f '^/tmp/etc/passwall/bin/openvpn_qemu_vpn ' >/dev/null
 ip -4 route show table 20000 | grep -q '^unreachable default.*metric 42760'
 nft list chain inet passwall PSW_OPENVPN_FWD | grep -q 'reject.*PSW_OPENVPN_GLOBAL_KILLSWITCH_default'
@@ -281,3 +282,4 @@ EOF
 # Reference migration tests use an isolated UCI directory in the disposable VM.
 ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua < "${OPENWRT_DIR}/tests/test-ezcnet-catalog.lua"
 python3 "${OPENWRT_DIR}/tests/test-switch-guard.py" "${SSH_PORT}" "${PROBE_PORT}"
+python3 "${OPENWRT_DIR}/tests/test-openvpn-health.py" "${SSH_PORT}" "${COMPRESSED_IMAGE}"

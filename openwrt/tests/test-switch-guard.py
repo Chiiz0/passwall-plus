@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+from switch_fixture import Upstream
 
 ssh_port, probe_port = map(int, sys.argv[1:])
 ssh = ["ssh", "-p", str(ssh_port), "-o", "BatchMode=yes", "-o",
@@ -19,8 +20,8 @@ ssh = ["ssh", "-p", str(ssh_port), "-o", "BatchMode=yes", "-o",
 
 
 def guest(script, check=True):
-    return subprocess.run(ssh + ["/bin/sh"], input="set -eu\n" + script,
-                          text=True, capture_output=True, check=check, timeout=180)
+    return subprocess.run(ssh + ["/bin/sh"], input="set -e\n" + script,
+                          text=True, capture_output=True, check=check, timeout=300)
 
 
 def checksum(data):
@@ -94,92 +95,225 @@ def probe(blocked):
         assert str(echo_port) in packets and "19994" in packets and "ICMP" in packets, packets
 
 
+def wait_for(script, timeout=100):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if guest(script, check=False).returncode == 0:
+            return
+        time.sleep(0.5)
+    raise AssertionError("Guest condition timed out: " + script)
+
+
+def launch():
+    return guest("rm -f /tmp/etc/passwall/start_complete\n"
+                 "nohup /etc/init.d/passwall restart >/tmp/transition.log 2>&1 </dev/null &\n"
+                 "echo $!\n").stdout.strip()
+
+
+def ready(node="good_a", result="ready"):
+    wait_for(f"test \"$(cat /tmp/passwall_switch/result)\" = {result}\n"
+             f"test \"$(uci get passwall.@global[0].node)\" = {node}\n"
+             "test ! -e /tmp/passwall_switch_guard\n"
+             "test \"$(cat /tmp/passwall_switch/phase)\" = idle\n")
+
+
+upstream = Upstream()
 try:
-    guest("cp /etc/config/passwall /tmp/guard-original\nip link set eth2 master br-lan\nip link set eth2 up\n")
+    guest("cp /etc/config/passwall /tmp/guard-original\n"
+          "cp /etc/ssl/certs/ca-certificates.crt /tmp/guard-original-ca\n"
+          "ip link set eth2 master br-lan\nip link set eth2 up\n"
+          "/etc/init.d/passwall stop\nrm -rf /etc/passwall/.switch\n")
     router_mac = bytes.fromhex(guest("cat /sys/class/net/br-lan/address\n").stdout.strip().replace(":", ""))
-    # Established flows must also be flushed before tearing down the old rules.
+    guest('''
+. /usr/share/passwall/utils.sh
+. /usr/share/passwall/switch_lifecycle.sh
+SWITCH_REQUEST=$(switch_read request)
+mkdir -p "$SWITCH_SAVE"
+switch_export > "$SWITCH_SAVE/last-good"
+uci set passwall.@global[0].probe_lock_case=candidate
+uci commit passwall
+switch_capture
+lua -e '
+ local n=require "nixio"
+ local f=assert(n.open("/var/lock/passwall_sub_rule.lock","a"))
+ assert(f:lock("tlock"))
+ local ready=assert(io.open("/tmp/native-lock-ready","w")); ready:close()
+ n.nanosleep(30)
+' &
+holder=$!
+for i in $(seq 1 30); do [ ! -e /tmp/native-lock-ready ] || break; sleep 0.1; done
+test -e /tmp/native-lock-ready
+! switch_restore_config
+test "$(uci get passwall.@global[0].probe_lock_case)" = candidate
+kill "$holder"
+wait "$holder" 2>/dev/null || true
+uci set passwall.@global[0].probe_lock_case=edited
+uci commit passwall
+! switch_restore_config
+test "$(uci get passwall.@global[0].probe_lock_case)" = edited
+switch_capture
+switch_restore_config
+! uci -q get passwall.@global[0].probe_lock_case
+rm -rf "$SWITCH_SAVE"
+rm /tmp/native-lock-ready
+''')
+    print("PASS: native subscription lock and changed configuration prevent stale rollback", flush=True)
     guest("uci set firewall.@defaults[0].flow_offloading=1\nuci commit firewall\nfw4 reload\n")
     probe(False)
     guest(f"grep 'sport=19991 dport={echo_port} ' /proc/net/nf_conntrack | grep -q OFFLOAD\n")
-    # An already offloaded flow must stop, even before the old core/rules are removed.
-    guest("uci set passwall.@global[0].enabled=1\nuci commit passwall\n. /usr/share/passwall/utils.sh\n. /usr/share/passwall/switch_guard.sh\nswitch_guard_begin\n")
+    guest("uci set passwall.@global[0].enabled=1\nuci commit passwall\n"
+          ". /usr/share/passwall/utils.sh\n. /usr/share/passwall/switch_guard.sh\nswitch_guard_begin\n")
     probe(True)
-    guest("""
-uci set passwall.guard_node=nodes
-uci set passwall.guard_node.type=Xray
-uci set passwall.guard_node.protocol=socks
-uci set passwall.guard_node.address=192.0.2.1
-uci set passwall.guard_node.port=1080
-uci set passwall.@global[0].enabled=1
-uci set passwall.@global[0].node=guard_node
-uci set passwall.@global[0].switch_guard=1
-uci set passwall.@global[0].use_gfw_list=0
-uci set passwall.@global[0].use_proxy_list=0
-uci set passwall.@global[0].use_direct_list=0
-uci set passwall.@global[0].use_block_list=0
-uci set passwall.@global[0].chn_list=0
-uci set passwall.@global[0].dns_shunt=chinadns-ng
-uci set passwall.@global[0].dns_mode=xray
-uci set passwall.@global[0].v2ray_dns_mode=tcp
-uci set passwall.@global[0].remote_dns=1.1.1.1
-uci commit passwall
-/etc/init.d/passwall restart
-test ! -e /tmp/passwall_switch_guard
-pgrep -f '/tmp/etc/passwall/bin/xray ' >/dev/null
-mkdir -p /tmp/guard-fault
-cat > /tmp/guard-fault/nft <<'SH'
-#!/bin/sh
-[ "$1" != -f ] || exit 1
-exec /usr/sbin/nft "$@"
-SH
-chmod +x /tmp/guard-fault/nft
-pgrep -f '^/tmp/etc/passwall/bin/xray ' > /tmp/guard-old-pids
-if PATH=/tmp/guard-fault:$PATH /etc/init.d/passwall restart; then exit 1; fi
-while read -r pid; do kill -0 "$pid"; done < /tmp/guard-old-pids
-/etc/init.d/passwall stop_for_update
-test -s /tmp/passwall_switch_guard
-! nft list table inet passwall | grep -q 'redirect to'
-""")
-    probe(True)
-    # The guard is independent of fw4 and of PassWall's ordinary chain cleanup.
-    guest("fw4 reload\nnft list table inet passwall_switch >/dev/null\n")
-    probe(True)
-    # Router-originated DNS/UDP/ICMP cannot use a private-address WAN either.
-    guest("! ping -c 1 -W 1 10.77.0.2\nnft list chain inet passwall_switch output | grep -Eq 'counter packets [1-9]'\n")
-    guest("/etc/init.d/passwall start\ntest ! -e /tmp/passwall_switch_guard\n")
-    # Invalid global node used to silently finish startup with no proxy rules.
-    guest("uci set passwall.@global[0].node=missing_node\nuci commit passwall\n! /etc/init.d/passwall restart\ntest -s /tmp/passwall_switch_guard\n")
-    probe(True)
-    guest("uci set passwall.@global[0].node=guard_node\nuci commit passwall\n/etc/init.d/passwall restart\ntest ! -e /tmp/passwall_switch_guard\n")
-    # Invalid core config: process launch succeeds, then Xray immediately exits.
-    guest("uci set passwall.guard_node.protocol=vmess\nuci set passwall.guard_node.uuid=00000000-0000-0000-0000-00000000000Z\nuci commit passwall\n! /etc/init.d/passwall restart\ntest -s /tmp/passwall_switch_guard\n")
-    probe(True)
-    # A live core must not lift protection when redirect rule installation fails.
+    print("PASS: guard blocks TCP/UDP/DNS/ICMP and established offloaded flow", flush=True)
+    guest(upstream.setup() + "\n/etc/init.d/passwall restart\n")
+    ready()
+    assert upstream.nodes["good_a"].requests > 0
+    guest("ls -l /etc/passwall/.switch/last-good | grep -q '^-rw-------'\n")
+    print("PASS: real SOCKS/TLS connectivity gates removal; private checkpoint", flush=True)
+
+    # Failure after installation must preserve the previous live proxy and undo
+    # the temporary barrier. Fault is scoped to this caller, not the watchdog.
     guest('''
-uci set passwall.guard_node.protocol=socks
+mkdir -p /tmp/guard-fault
+cat > /tmp/guard-fault/fw4 <<'SH'
+#!/bin/sh
+[ "$1" != reload ] || exit 1
+exec /sbin/fw4 "$@"
+SH
+chmod +x /tmp/guard-fault/fw4
+pgrep -f '^/tmp/etc/passwall/bin/xray ' > /tmp/guard-old-pids
+! PATH=/tmp/guard-fault:$PATH /etc/init.d/passwall restart
+while read -r pid; do kill -0 "$pid"; done < /tmp/guard-old-pids
+test ! -e /tmp/passwall_switch_guard
+test "$(cat /tmp/passwall_switch/result)" = cancelled
+rm /tmp/guard-fault/fw4
+''')
+    print("PASS: partial arm failure cancels without tearing down healthy proxy", flush=True)
+
+    guest("uci set passwall.@global[0].node=bad_b\nuci commit passwall\n")
+    pid = launch()
+    wait_for("test -f /tmp/etc/passwall/start_complete\ntest -s /tmp/passwall_switch_guard\n")
+    probe(True)
+    ready(result="rolled_back")
+    print("PASS: unreachable node stays protected then rolls back automatically", flush=True)
+
+    # Delayed core launch must eventually recover, even though the config test
+    # completes immediately. Never gate Xray's synchronous `run -test` command.
+    guest('''
+cat > /tmp/delayed-xray <<'SH'
+#!/bin/sh
+if [ "$1" = run ] && [ "$2" != -test ]; then
+ while [ ! -f /tmp/release-xray ]; do sleep 1; done
+fi
+exec /usr/bin/xray "$@"
+SH
+chmod +x /tmp/delayed-xray
+uci set passwall.@global_app[0].xray_file=/tmp/delayed-xray
 uci commit passwall
+rm -f /tmp/release-xray
+''')
+    pid = launch()
+    wait_for("test -f /tmp/etc/passwall/start_complete\ntest -s /tmp/passwall_switch_guard\n")
+    probe(True)
+    guest("touch /tmp/release-xray\n")
+    ready()
+    print("PASS: delayed listeners recover without a manual restart", flush=True)
+
+    # Controller death must leave no inherited service lock. A separate procd
+    # service resumes the transition while old stage children are cancelled.
+    guest("rm /tmp/release-xray\n")
+    pid = launch()
+    wait_for("test -f /tmp/etc/passwall/start_complete\ntest -s /tmp/passwall_switch_guard\n")
+    guest(f"kill -KILL {pid}\ntouch /tmp/release-xray\n")
+    ready()
+    print("PASS: killed controller recovers through independent supervisor", flush=True)
+
+    guest("rm /tmp/release-xray\n")
+    launch()
+    wait_for("test -f /tmp/etc/passwall/start_complete\ntest -s /tmp/passwall_switch_guard\n")
+    guest("/etc/init.d/passwall stop\ntouch /tmp/release-xray\nsleep 5\n"
+          "test \"$(cat /tmp/passwall_switch/result)\" = stopped\n"
+          "test ! -e /tmp/passwall_switch_guard\n"
+          "! pgrep -f '^/tmp/etc/passwall/bin/xray '\n"
+          "uci delete passwall.@global_app[0].xray_file\nuci commit passwall\n")
+    probe(False)
+    print("PASS: explicit stop cancels delayed startup and prevents resurrection", flush=True)
+
+    guest("/etc/init.d/passwall restart\nuci set passwall.@global[0].node=bad_b\nuci commit passwall\n")
+    launch()
+    wait_for("test -f /tmp/etc/passwall/start_complete\ntest -s /tmp/passwall_switch_guard\n")
+    guest("uci set passwall.@global[0].node=good_c\nuci commit passwall\n/etc/init.d/passwall restart\n")
+    ready(node="good_c")
+    print("PASS: newest switch cancels previous work without stale rollback", flush=True)
+
+    guest('''
+sha256sum /usr/bin/xray > /tmp/original-core.sha
+printf '#!/bin/sh\nexit 1\n' > /tmp/bad-core
+! /etc/init.d/passwall update_core /tmp/bad-core /usr/bin/xray
+sha256sum -c /tmp/original-core.sha
+test ! -e /etc/passwall/.switch/core-update
+test ! -e /usr/bin/xray.passwall-previous
+''')
+    ready(node="good_c", result="rolled_back")
+    print("PASS: failed core replacement restores binary and verified service", flush=True)
+
+    guest("kill -KILL $(pgrep -f '^/tmp/etc/passwall/bin/xray ')\n")
+    wait_for("test -s /tmp/passwall_switch_guard\n", timeout=15)
+    probe(True)
+    ready(node="good_c")
+    print("PASS: runtime core death promptly triggers protected recovery", flush=True)
+
+    # A failed table query must not lose ownership of a real drop table.
+    guest('''
+. /usr/share/passwall/utils.sh
+. /usr/share/passwall/switch_guard.sh
+switch_guard_begin
 cat > /tmp/guard-fault/nft <<'SH'
 #!/bin/sh
-case "$*" in
-  "add rule inet passwall dstnat "*"jump PSW_NAT"*) exit 1 ;;
-esac
+[ "$*" != 'list tables' ] || exit 1
 exec /usr/sbin/nft "$@"
 SH
 chmod +x /tmp/guard-fault/nft
-if PATH=/tmp/guard-fault:$PATH /etc/init.d/passwall restart; then exit 1; fi
+! PATH=/tmp/guard-fault:$PATH switch_guard_end
 test -s /tmp/passwall_switch_guard
-test -s /tmp/etc/passwall/firewall_error
+nft list table inet passwall_switch >/dev/null
+! PATH=/tmp/guard-fault:$PATH /etc/init.d/passwall stop
 ''')
-    probe(True)
-    guest("/etc/init.d/passwall stop\ntest ! -e /tmp/passwall_switch_guard\n")
+    wait_for("test ! -e /tmp/passwall_switch_guard\ntest \"$(cat /tmp/passwall_switch/result)\" = stopped\n")
+    guest('''
+rm /tmp/guard-fault/nft
+. /usr/share/passwall/utils.sh
+. /usr/share/passwall/switch_guard.sh
+switch_guard_begin
+rm /tmp/passwall_switch_guard
+/etc/init.d/passwall stop
+! nft list tables | grep -q 'table inet passwall_switch'
+''')
     probe(False)
-    print("Switch guard packet checks passed: TCP/UDP/DNS/ICMP, established offloaded flow, fw4 reload, protected update, guard/rule installation failures, invalid node/core, recovery and explicit stop")
-except subprocess.CalledProcessError as error:
-    print(error.stdout, error.stderr, file=sys.stderr)
-    print(guest("tail -n 100 /tmp/log/passwall.log\n", check=False).stdout, file=sys.stderr)
+    print("PASS: query failure retains ownership; stop clears orphaned barrier", flush=True)
+
+    guest("rm -rf /etc/passwall/.switch\nuci set passwall.@global[0].node=bad_b\nuci commit passwall\n"
+          "! /etc/init.d/passwall restart\ntest -s /tmp/passwall_switch_guard\n")
+    probe(True)
+    guest("fw4 reload\nnft list table inet passwall_switch >/dev/null\n! ping -c 1 -W 1 10.77.0.2\n")
+    probe(True)
+    upstream.nodes["bad_b"].enabled = True
+    ready(node="bad_b")
+    print("PASS: no usable fallback stays protected across fw4 reload, then auto-recovers", flush=True)
+
+    guest("pgrep -f '^/bin/sh /usr/libexec/passwall-guard-watch$' > /tmp/old-watch\nkill -KILL $(cat /tmp/old-watch)\n")
+    wait_for("pid=$(pgrep -f '^/bin/sh /usr/libexec/passwall-guard-watch$')\ntest -n \"$pid\"\ntest \"$pid\" != \"$(cat /tmp/old-watch)\"\n", timeout=20)
+    print("PASS: procd respawns recovery supervisor", flush=True)
+except (subprocess.CalledProcessError, AssertionError):
+    print(guest("cat /tmp/transition.log\ntail -n 100 /tmp/log/passwall.log\n", check=False).stdout, file=sys.stderr)
     raise
 finally:
-    guest("cp /tmp/guard-original /etc/config/passwall\nuci delete firewall.@defaults[0].flow_offloading\nuci commit firewall\n/etc/init.d/passwall stop\n/etc/init.d/passwall start\nfw4 reload\n", check=False)
+    guest("cp /tmp/guard-original /etc/config/passwall\n"
+          "cp /tmp/guard-original-ca /etc/ssl/certs/ca-certificates.crt\n"
+          "uci -q delete firewall.@defaults[0].flow_offloading || true\nuci commit firewall\n"
+          "/etc/init.d/passwall stop\nrm -rf /etc/passwall/.switch\n"
+          "/etc/init.d/passwall start\nfw4 reload\n", check=False)
+    upstream.close()
     finished.set()
     responder.join(timeout=1)
     sock.close()

@@ -41,7 +41,7 @@ function M.lock(path)
  if not f:lock('tlock') then f:close(); return nil end
  return f
 end
-function M.restart() return os.execute('/usr/bin/timeout -k 5 60 /etc/init.d/passwall restart >/dev/null 2>&1')==0 end
+function M.restart() return os.execute('/usr/bin/timeout -k 5 240 /etc/init.d/passwall restart >/dev/null 2>&1')==0 end
 function M.check(ok,code) if not ok then error(code,0) end end
 function M.valid_id(id) return type(id)=='string' and #id<=64 and id:match('^[%w_-]+$') end
 function M.stage()

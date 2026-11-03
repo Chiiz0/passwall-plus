@@ -1538,22 +1538,19 @@ function to_move(app_name,file)
 
 	local flag = sys.call('busybox pgrep -af "passwall/.*'.. app_name ..'" >/dev/null')
 	if flag == 0 then
-		if sys.call("/etc/init.d/passwall stop_for_update") ~= 0 then
-			return {code = 1, error = i18n.translate("Unable to protect the network before updating the core.")}
-		end
+		-- The service owns backup, replacement, validation and rollback under one
+		-- lock. A killed RPC cannot leave a late file move racing with recovery.
+		result = exec("/etc/init.d/passwall", {"update_core", bin_path, app_path}, nil, 240) == 0
+	else
+		result = exec("/bin/mv", { "-f", bin_path, app_path }, nil, command_timeout) == 0
 	end
-
-	result = exec("/bin/mv", { "-f", bin_path, app_path }, nil, command_timeout) == 0
 
 	remove(rm_tmp)
-	if flag == 0 then
-		sys.call("/etc/init.d/passwall restart >/dev/null 2>&1 &")
-	end
 
 	if not result or not fs.access(app_path) then
 		return {
 			code = 1,
-			error = i18n.translatef("Can't move new file to path: %s", app_path)
+			error = i18n.translate("Core update failed validation. The previous core is restored when recovery is possible; inspect the switch status.")
 		}
 	end
 

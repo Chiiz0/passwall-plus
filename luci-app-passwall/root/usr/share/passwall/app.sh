@@ -1855,14 +1855,14 @@ sync_device_policies() {
 }
 
 start() {
-	switch_guard_begin || return 1
+	# The init controller owns the barrier and the recovery transaction.
 	busybox pgrep -f ${TMP_PATH}/bin > /dev/null 2>&1 && {
 		logger -t PSW-RESTART "Upgrade or overload residue is detected, and the subprocess is being called to perform complete cleaning..."
 		(stop "$1")
 		sleep 2
 	}
 	mkdir -p /tmp/etc /tmp/log $TMP_PATH $TMP_BIN_PATH $TMP_SCRIPT_FUNC_PATH $TMP_ROUTE_PATH $TMP_ACL_PATH $TMP_PATH2
-	rm -f "$TMP_PATH/firewall_ready" "$TMP_PATH/firewall_error"
+	rm -f "$TMP_PATH/firewall_ready" "$TMP_PATH/firewall_error" "$TMP_PATH/start_complete"
 	sync_device_policies
 	set_cache_var "LOCAL_DNS" "$LOCAL_DNS"
 	get_config
@@ -1919,13 +1919,13 @@ start() {
 		}
 	fi
 
-	if switch_guard_active; then
-		if ! switch_guard_ready; then
-			echolog "节点进程或防火墙未就绪，切换保护保持阻断。请修复配置后重试；主动停止服务可解除保护。"
-			return 1
-		fi
-		switch_guard_end || return 1
-	fi
+	touch "$TMP_PATH/start_complete"
+	return 0
+}
+
+finish_start() {
+	eval_cache_var
+	ENABLED=$(config_n_get @global[0] enabled 0)
 	start_crontab "$1"
 	echolog "运行完成！\n"
 
@@ -2132,9 +2132,15 @@ socks_node_switch)
 	socks_node_switch "$@"
 	;;
 start)
+	[ "$PASSWALL_TRANSITION_MANAGED" = 1 ] || exec /etc/init.d/passwall start "$@"
 	start "$@"
 	;;
+finish)
+	[ "$PASSWALL_TRANSITION_MANAGED" = 1 ] || exit 1
+	finish_start "$@"
+	;;
 stop)
+	[ "$PASSWALL_TRANSITION_MANAGED" = 1 ] || exec /etc/init.d/passwall stop "$@"
 	stop "$@"
 	;;
 esac

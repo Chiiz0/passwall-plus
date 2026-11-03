@@ -1,0 +1,15 @@
+#!/bin/sh
+# Kept outside /usr/share/passwall/ so the normal proxy cleanup cannot kill us.
+while :; do
+	if [ -s /tmp/passwall_switch/request ]; then
+		case "$(cat /tmp/passwall_switch/phase 2>/dev/null)" in
+			''|idle)
+				{ [ "$(cat /tmp/passwall_switch/request)" = "$(cat /tmp/passwall_switch/handled 2>/dev/null)" ] &&
+					/usr/libexec/passwall-guard-check runtime; } ||
+					/etc/init.d/passwall recover >/dev/null 2>&1
+				;;
+			*) /etc/init.d/passwall recover >/dev/null 2>&1 ;;
+		esac
+	fi
+	sleep 3
+done

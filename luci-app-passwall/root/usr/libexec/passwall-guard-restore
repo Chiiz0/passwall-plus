@@ -1,0 +1,5 @@
+#!/bin/sh
+. /usr/share/passwall/utils.sh
+. /usr/share/passwall/switch_lifecycle.sh
+SWITCH_REQUEST="$PASSWALL_RESTORE_REQUEST"
+switch_restore_locked

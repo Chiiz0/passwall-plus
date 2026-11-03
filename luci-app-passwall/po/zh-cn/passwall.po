@@ -2168,3 +2168,42 @@ msgstr "启动和切换节点期间暂停转发流量、客户端 DNS 和普通�
 
 msgid "Unable to protect the network before updating the core."
 msgstr "更新核心前无法启用网络保护，已取消更新。"
+
+msgid "Pause traffic while switching. Verify processes, firewall and proxy connectivity before resuming. On failure, recover the last verified configuration; if recovery fails, keep blocking and retry automatically. An explicit stop restores normal networking. Direct ACLs also pause during transitions."
+msgstr "切换期间暂停流量，确认进程、防火墙和代理连通后恢复。失败时回退最近验证成功的配置；恢复失败则保持阻断并自动重试。主动停止服务可恢复系统网络。直连设备在切换时也会暂停。"
+
+msgid "Switch connectivity check URLs"
+msgstr "切换连通性检查地址"
+
+msgid "HTTPS endpoints returning 200 or 204. Checks use each active proxy or VPN; any one endpoint may succeed. Empty uses the node test URL and Gstatic. Choose endpoints reachable through your routing policy."
+msgstr "填写返回 200 或 204 的 HTTPS 地址。通过每个使用中的代理或 VPN 检查，任一地址成功即可。留空使用节点测试地址和 Gstatic。请选择符合当前分流策略的可达地址。"
+
+msgid "Use an HTTPS URL without spaces."
+msgstr "请输入不含空格的 HTTPS 地址。"
+
+msgid "Switch recovery status"
+msgstr "切换恢复状态"
+
+msgid "Previous verified configuration restored"
+msgstr "已回退最近验证成功的配置"
+
+msgid "Switch cancelled; previous proxy retained"
+msgstr "切换已取消，原代理继续运行"
+
+msgid "Protected; automatic recovery pending"
+msgstr "保护中，正在自动恢复"
+
+msgid "Stopped; normal network restored"
+msgstr "已停止，系统网络已恢复"
+
+msgid "No switch result yet"
+msgstr "暂无切换结果"
+
+msgid "Core update failed validation. The previous core is restored when recovery is possible; inspect the switch status."
+msgstr "新核心未通过验证，恢复流程将还原旧核心，请查看切换恢复状态。"
+
+msgid "Switching; network protected"
+msgstr "正在切换；网络保护中"
+
+msgid "Ready"
+msgstr "已就绪"

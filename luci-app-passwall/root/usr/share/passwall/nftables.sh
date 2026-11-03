@@ -377,6 +377,9 @@ load_openvpn() {
 	nft "flush chain $NFTABLE_NAME PSW_OPENVPN_DNS"
 	nft "add chain $NFTABLE_NAME PSW_OPENVPN_OUTPUT" 2>/dev/null
 	nft "flush chain $NFTABLE_NAME PSW_OPENVPN_OUTPUT"
+	# Recovery probes may use another active device tunnel than the global one.
+	# Restrict this exception to bootstrap GID and explicitly bound TUN devices.
+	nft "add rule $NFTABLE_NAME PSW_OPENVPN_OUTPUT meta skgid $DIRECT_GID oifname \"pswov*\" counter accept comment \"PSW_OPENVPN_CHECK\""
 	nft "add chain $NFTABLE_NAME PSW_OPENVPN_DNS_OUT" 2>/dev/null
 	nft "flush chain $NFTABLE_NAME PSW_OPENVPN_DNS_OUT"
 	local has_rules=0 has_input_rules=0 has_dns_rules=0 has_dns_output_rules=0 has_output_rules=0 dir dev dns ip allow_lan sid lan_device

@@ -461,6 +461,10 @@ tunnel_up() {
 	ip -4 route del default dev "$dev" table "$table" 2>/dev/null
 	ip -4 route add default dev "$dev" metric 10 table "$table" 2>/dev/null
 	ensure_killswitch "$table"
+	# Locally generated diagnostics bind their socket to this TUN. Select its
+	# own table before global/source policies, including for ACL-only tunnels.
+	while ip -4 rule del priority 90 oif "$dev" lookup "$table" 2>/dev/null; do :; done
+	ip -4 rule add priority 90 oif "$dev" lookup "$table" || return 1
 	refresh_policy "$node"
 	refresh_global_policy "$node"
 	echolog "OpenVPN 节点[$node]隧道[$dev]已接通。"
@@ -500,6 +504,10 @@ cleanup_node() {
 	table=$(cat "$dir/table" 2>/dev/null)
 	dev=$(cat "$dir/dev" 2>/dev/null)
 	clear_recorded_global_policy "$dir"
+	case "$dev:$table" in pswov[0-9]*:[0-9]*)
+		while ip -4 rule del priority 90 oif "$dev" lookup "$table" 2>/dev/null; do :; done
+		;;
+	esac
 	while IFS='|' read -r ip allow_lan sid; do
 		valid_ipv4 "$ip" || continue
 		case "$priority" in

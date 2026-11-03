@@ -51,7 +51,7 @@ local function section(c)
 	return name
 end
 local function restart()
-	return os.execute("/usr/bin/timeout -k 5 60 /etc/init.d/passwall restart >/dev/null 2>&1") == 0
+	return os.execute("/usr/bin/timeout -k 5 240 /etc/init.d/passwall restart >/dev/null 2>&1") == 0
 end
 
 local installation_id = read(persist .. "/installation_id"):match("^([a-f0-9-]+)")

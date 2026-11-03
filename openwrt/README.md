@@ -46,7 +46,7 @@ kernel remain on the 25.12.6 baseline. Both pins are recorded in `build-info.txt
 
 ## Test
 
-The test boots the BIOS ext4 image with two emulated e1000 NICs and checks the
+The test boots the BIOS ext4 image with three emulated e1000 NICs and checks the
 network mapping, WAN DHCP, IPv6 policy, installed binaries, LuCI, `fw4 check`,
 `fw4 reload`, and kernel logs for nftables crashes:
 
@@ -59,14 +59,18 @@ use. The QEMU disk is a temporary copy, so the firmware artifact is not modified
 It also compiles the installed Lua sources, renders authenticated LuCI global,
 OpenVPN-node and ACL pages, verifies global OpenVPN supervision and fail-closed
 routing with an unreachable test server, and checks managed DHCP leases and
-IP/MAC guard creation and cleanup. These checks do not establish a successful
-VPN tunnel to an external server. A third emulated NIC injects real LAN TCP,
+IP/MAC guard creation and cleanup. A second isolated VM establishes a real TLS
+OpenVPN tunnel and verifies HTTPS through its TUN device. A third emulated NIC injects real LAN TCP,
 UDP, DNS and ICMP packets and verifies that no matching packets reach the WAN
 while the switch guard is active, including an established offloaded UDP flow,
-fw4 reload, guard/rule installation failures and failed core startup. The tests also verify retry recovery and explicit stop behavior.
+fw4 reload and partial protection failures. Local SOCKS/TLS fixtures exercise
+verified startup, unreachable-node rollback, delayed listeners, controller death,
+new-request cancellation, failed binary replacement, orphan cleanup, runtime
+core death and recovery after an unavailable upstream returns.
 `QEMU_PROBE_PORT` (default 2233, also reserving the following UDP port) can be
 changed for concurrent runs. No host root privileges or external proxy account
-are needed.
+are needed. The OpenVPN fixture also reserves TCP `QEMU_SSH_PORT + 10` and
+UDP `QEMU_SSH_PORT + 20`; it requires the host `openssl` command.
 
 The Plus self-updater's version selection and rejection of upstream package URLs
 can be tested separately with Python 3 and Lua 5.1:
@@ -84,8 +88,8 @@ the QEMU boot test, and uploads all images, manifests, build metadata, and
 `SHA256SUMS`. For example:
 
 ```sh
-git tag -a firmware-v25.12.6-r2 -m "PassWall Plus OpenWrt 25.12.6 r2"
-git push origin firmware-v25.12.6-r2
+git tag -a firmware-v25.12.6-r3 -m "PassWall Plus OpenWrt 25.12.6 r3"
+git push origin firmware-v25.12.6-r3
 ```
 
 The release also includes the built `luci-app-passwall`, `luci-app-passwall-ezcnet`,

@@ -608,9 +608,23 @@ else
 	end
 end
 
-o = s:taboption("Proxy", Flag, "switch_guard", translate("Protect network during node switches"), translate("Pause forwarded traffic, client DNS and ordinary router traffic during startup and node switches. Management replies and proxy bootstrap remain available. If startup fails, keep blocking until a successful retry or an explicit service stop. Applies to all devices, including direct ACLs, during the transition."))
+o = s:taboption("Proxy", Flag, "switch_guard", translate("Protect network during node switches"), translate("Pause traffic while switching. Verify processes, firewall and proxy connectivity before resuming. On failure, recover the last verified configuration; if recovery fails, keep blocking and retry automatically. An explicit stop restores normal networking. Direct ACLs also pause during transitions."))
 o.default = "1"
 o.rmempty = false
+
+o = s:taboption("Proxy", DynamicList, "switch_guard_probe_url", translate("Switch connectivity check URLs"), translate("HTTPS endpoints returning 200 or 204. Checks use each active proxy or VPN; any one endpoint may succeed. Empty uses the node test URL and Gstatic. Choose endpoints reachable through your routing policy."))
+o:depends("switch_guard", "1")
+function o.validate(self, value)
+	if value and value:match("^https://[^%s]+$") then return value end
+	return nil, translate("Use an HTTPS URL without spaces.")
+end
+
+o = s:taboption("Proxy", DummyValue, "_switch_guard_status", translate("Switch recovery status"))
+function o.cfgvalue()
+	local status = (require("nixio.fs").readfile("/tmp/passwall_switch/result") or ""):gsub("%s+$", "")
+	local labels = {switching="Switching; network protected", ready="Ready", rolled_back="Previous verified configuration restored", cancelled="Switch cancelled; previous proxy retained", blocked="Protected; automatic recovery pending", stopped="Stopped; normal network restored"}
+	return translate(labels[status] or "No switch result yet")
+end
 
 o = s:taboption("Proxy", DummyValue, "_proxy_tips", "　")
 o.rawhtml = true

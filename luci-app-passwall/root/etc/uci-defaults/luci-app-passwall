@@ -2,6 +2,8 @@
 
 # Apply to existing installations as well as the dedicated firmware.
 sysctl -e -w net.mptcp.enabled=0 >/dev/null 2>&1 || true
+/etc/init.d/passwall-guard enable >/dev/null 2>&1 || true
+/etc/init.d/passwall-guard start >/dev/null 2>&1 || true
 
 if [ -e "/etc/config/ucitrack" ]; then
 	uci -q batch <<-EOF
