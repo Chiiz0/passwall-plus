@@ -40,31 +40,50 @@ switch_export() {
 }
 
 switch_digest_file() {
-	# The startup script maintains this bookkeeping option itself.
-	sed '/^[[:space:]]*option dnsmasq_dns_redirect /d' "$1" | sha256sum | cut -d' ' -f1
+	local directory digest
+	directory=$(mktemp -d "$SWITCH_DIR/.hash.XXXXXX") || return 1
+	if cp "$1" "$directory/passwall" &&
+		lua /usr/libexec/passwall-guard-digest.lua "$directory" > "$directory/canonical"; then
+		digest=$(sha256sum "$directory/canonical" | cut -d' ' -f1)
+		rm -rf "$directory"
+		printf '%s\n' "$digest"
+	else
+		rm -rf "$directory"
+		return 1
+	fi
 }
 
 switch_digest() {
 	local tmp digest
 	tmp=$(mktemp "$SWITCH_DIR/.digest.XXXXXX") || return 1
 	switch_export > "$tmp" || { rm -f "$tmp"; return 1; }
-	digest=$(switch_digest_file "$tmp")
+	digest=$(switch_digest_file "$tmp") || { rm -f "$tmp"; return 1; }
 	rm -f "$tmp"
 	printf '%s\n' "$digest"
 }
 
 switch_capture() {
-	local tmp
+	local tmp digest
 	tmp=$(mktemp "$SWITCH_DIR/.candidate.XXXXXX") || return 1
 	switch_export > "$tmp" && mv -f "$tmp" "$SWITCH_DIR/candidate" || { rm -f "$tmp"; return 1; }
-	switch_write desired "$(switch_digest_file "$SWITCH_DIR/candidate")"
+	digest=$(switch_digest_file "$SWITCH_DIR/candidate") || return 1
+	switch_write desired "$digest"
 }
 
 switch_request() {
 	local id
 	id=$(cat /proc/sys/kernel/random/uuid) || return 1
-	SWITCH_REQUEST="$id $1"
+	SWITCH_REQUEST="$id $$ $(get_process_start_time $$) $1"
 	switch_write request "$SWITCH_REQUEST"
+}
+
+switch_request_alive() {
+	# Do not let the watcher take a newly queued request away from its caller
+	# before that caller acquires the lock. PID start time prevents PID reuse.
+	set -- $SWITCH_REQUEST
+	local pid="$2" started="$3"
+	case "$pid:$started" in ''|*[!0-9:]*|:*|*:) return 1 ;; esac
+	[ "$(get_process_start_time "$pid")" = "$started" ]
 }
 
 switch_supervisor() {
@@ -209,13 +228,14 @@ switch_core_commit() {
 }
 
 switch_checkpoint() {
-	local tmp
+	local tmp digest
 	switch_has_proxy || return 0
 	umask 077
 	mkdir -p "$SWITCH_SAVE" && chmod 700 "$SWITCH_SAVE" || return 1
 	tmp=$(mktemp "$SWITCH_SAVE/.good.XXXXXX") || return 1
 	cp "$SWITCH_DIR/candidate" "$tmp" && mv -f "$tmp" "$SWITCH_SAVE/last-good" || return 1
-	switch_write running "$(switch_digest_file "$SWITCH_SAVE/last-good")"
+	digest=$(switch_digest_file "$SWITCH_SAVE/last-good") || return 1
+	switch_write running "$digest"
 }
 
 switch_restore_config() {
@@ -251,8 +271,10 @@ switch_restore_locked() {
 }
 
 switch_finish() {
+	local digest
 	switch_current || return 1
-	[ "$(switch_digest)" = "$(switch_read desired)" ] || return 1
+	digest=$(switch_digest) || return 1
+	[ -n "$digest" ] && [ "$digest" = "$(switch_read desired)" ] || return 1
 	switch_phase clearing
 	switch_guard_end || return 1
 	switch_current || return 1

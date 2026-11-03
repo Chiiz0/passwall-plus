@@ -150,7 +150,7 @@ test -f /var/lock/passwall_ready.lock
 # Compile every installed Lua source with the firmware's native Lua compiler.
 # lua is installed by LuCI; standalone luac is not part of the firmware.
 lua <<'LUA'
-local command = "find /usr/lib/lua/luci/passwall /usr/lib/lua/luci/model/cbi/passwall /usr/lib/lua/luci/controller/passwall.lua /usr/share/passwall /usr/share/passwall-ezcnet /usr/lib/lua/luci/controller/passwall_ezcnet.lua /usr/lib/lua/luci/model/cbi/passwall_ezcnet.lua -name '*.lua'"
+local command = "find /usr/lib/lua/luci/passwall /usr/lib/lua/luci/model/cbi/passwall /usr/lib/lua/luci/controller/passwall.lua /usr/share/passwall /usr/share/passwall-ezcnet /usr/lib/lua/luci/controller/passwall_ezcnet.lua /usr/lib/lua/luci/model/cbi/passwall_ezcnet.lua /usr/libexec/passwall-guard-digest.lua -name '*.lua'"
 local files = assert(io.popen(command))
 local count = 0
 for path in files:lines() do

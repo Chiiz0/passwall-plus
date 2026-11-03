@@ -83,11 +83,15 @@ keepalive 2 10
 verb 3
 ''')
         guest(server_port, '''
-for i in $(seq 1 90); do
- [ -f /var/lock/passwall_ready.lock ] && break
- sleep 1
+for pid in $(pgrep -f '^/bin/sh /etc/rc.common /etc/rc.d/S99passwall boot$'); do
+ kill "$pid" 2>/dev/null || true
 done
+/etc/init.d/passwall disable
 /etc/init.d/passwall stop
+if [ -x /etc/init.d/passwall-guard ]; then
+ /etc/init.d/passwall-guard stop
+ /etc/init.d/passwall-guard disable
+fi
 nft insert rule inet fw4 input_wan udp dport 1194 accept
 nft insert rule inet fw4 forward iifname tun0 accept
 openvpn --config /tmp/vpn-server.conf --log /tmp/vpn-server.log --daemon
@@ -135,7 +139,7 @@ uci set passwall.health_acl.mode=1
 uci set passwall.health_acl.node=device_vpn
 uci set passwall.@global[0].acl_enable=1
 uci commit passwall
-/etc/init.d/passwall restart
+/bin/sh -x /etc/rc.common /etc/init.d/passwall restart >/tmp/vpn-switch-trace 2>&1
 test "$(cat /tmp/passwall_switch/result)" = ready
 test ! -e /tmp/passwall_switch_guard
 ip -4 route show table 20001 | grep -q '^default dev pswov1 .*metric 10'
@@ -147,7 +151,10 @@ test ! -e /tmp/passwall_switch_guard
 ip -4 rule show | grep -q 'oif pswov1 lookup 20001'
 ''')
         print('PASS: simultaneous global/device VPNs and ACL-only tunnel health', flush=True)
-except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+    print("Guest failure:", getattr(error, "returncode", "timeout"), error.stdout, error.stderr, file=sys.stderr)
+    print(guest(client_port, 'tail -n 160 /tmp/vpn-switch-trace 2>/dev/null || true\n', check=False).stdout, file=sys.stderr)
+    print(guest(client_port, 'cat /tmp/passwall_switch/phase /tmp/passwall_switch/result /tmp/passwall_switch/request\n', check=False).stdout, file=sys.stderr)
     print(guest(client_port, 'tail -n 80 /tmp/log/passwall.log\ncat /tmp/etc/passwall/openvpn/nodes/*/log 2>/dev/null || true\n', check=False).stdout, file=sys.stderr)
     print(guest(server_port, 'cat /tmp/vpn-server.log\n', check=False).stdout, file=sys.stderr)
     raise

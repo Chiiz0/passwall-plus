@@ -138,7 +138,7 @@ lua -e '
  local f=assert(n.open("/var/lock/passwall_sub_rule.lock","a"))
  assert(f:lock("tlock"))
  local ready=assert(io.open("/tmp/native-lock-ready","w")); ready:close()
- n.nanosleep(30)
+ n.nanosleep(30, 0)
 ' &
 holder=$!
 for i in $(seq 1 30); do [ ! -e /tmp/native-lock-ready ] || break; sleep 0.1; done
@@ -169,6 +169,13 @@ rm /tmp/native-lock-ready
     ready()
     assert upstream.nodes["good_a"].requests > 0
     guest("ls -l /etc/passwall/.switch/last-good | grep -q '^-rw-------'\n")
+    guest('''
+PASSWALL_TEST_DNS_UID=$(id -u dnsmasq) lua -e '
+ local n=require "nixio"
+ assert(n.setuid(tonumber(os.getenv("PASSWALL_TEST_DNS_UID"))))
+ assert(io.open("/tmp/etc/passwall_tmp/dhcp-hosts", "r")):close()
+'
+''')
     print("PASS: real SOCKS/TLS connectivity gates removal; private checkpoint", flush=True)
 
     # Failure after installation must preserve the previous live proxy and undo
@@ -215,6 +222,11 @@ rm -f /tmp/release-xray
     pid = launch()
     wait_for("test -f /tmp/etc/passwall/start_complete\ntest -s /tmp/passwall_switch_guard\n")
     probe(True)
+    guest('''
+request=$(cat /tmp/passwall_switch/request)
+/etc/init.d/passwall reload
+test "$(cat /tmp/passwall_switch/request)" = "$request"
+''')
     guest("touch /tmp/release-xray\n")
     ready()
     print("PASS: delayed listeners recover without a manual restart", flush=True)
@@ -231,7 +243,7 @@ rm -f /tmp/release-xray
     guest("rm /tmp/release-xray\n")
     launch()
     wait_for("test -f /tmp/etc/passwall/start_complete\ntest -s /tmp/passwall_switch_guard\n")
-    guest("/etc/init.d/passwall stop\ntouch /tmp/release-xray\nsleep 5\n"
+    guest("/etc/init.d/passwall stop\n/etc/init.d/passwall reload\ntouch /tmp/release-xray\nsleep 5\n"
           "test \"$(cat /tmp/passwall_switch/result)\" = stopped\n"
           "test ! -e /tmp/passwall_switch_guard\n"
           "! pgrep -f '^/tmp/etc/passwall/bin/xray '\n"

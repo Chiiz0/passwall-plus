@@ -166,6 +166,7 @@ update_core() {
 recover() {
  SWITCH_REQUEST=$(switch_read request)
  [ -n "$SWITCH_REQUEST" ] || return 0
+ switch_request_alive && return 0
  set_lock || return 0
  switch_current || { unset_lock; return 0; }
  switch_cancel_stages
@@ -175,4 +176,17 @@ recover() {
  unset_lock
  return "$status"
 }
-reload() { restart; }
+reload() {
+ # UCI bookkeeping can emit config.change while its own start is running.
+ # Coalesce those notifications; explicit restart always creates a new request.
+ local request=$(switch_read request) phase=$(switch_read phase) digest
+ case "$request" in *' stop') return 0 ;; esac
+ digest=$(switch_digest) || { restart; return $?; }
+ if [ "$phase" != idle ] && [ "$digest" = "$(switch_read desired)" ]; then
+  return 0
+ fi
+ if [ "$phase" = idle ] && [ "$digest" = "$(switch_read running)" ] && switch_guard_ready; then
+  return 0
+ fi
+ restart
+}

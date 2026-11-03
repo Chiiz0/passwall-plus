@@ -70,6 +70,17 @@ switch_exec() {
         else:
             assert not result_file.exists(), 'Superseded work wrote a terminal status'
 
+    process = subprocess.run(['/bin/sh'], input=setup + '''
+get_process_start_time() { [ "$1" = "$$" ] && echo 123; }
+SWITCH_REQUEST="uuid $$ 123 restart"
+switch_request_alive || exit 1
+SWITCH_REQUEST="uuid $$ 122 restart"
+! switch_request_alive || exit 1
+SWITCH_REQUEST='legacy restart'
+! switch_request_alive
+''', text=True, env=env)
+    assert process.returncode == 0, 'Request ownership must distinguish live callers and PID reuse'
+
     # Production cleanup must distinguish command failure from absence, retain
     # ownership when deletion fails, and remove a table with a missing marker.
     nft = directory / 'nft'

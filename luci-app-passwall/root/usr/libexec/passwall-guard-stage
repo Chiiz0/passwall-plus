@@ -12,4 +12,7 @@ started=$(sed 's/.*) //' "/proc/$$/stat" | awk '{print $20}')
 printf '%s\n%s\n' "$$" "$started" > "$directory/.stage-$stage"
 mv -f "$directory/.stage-$stage" "$directory/stages/$stage" || exit 1
 [ "$(cat "$directory/stage")" = "$stage" ] && [ "$(cat "$directory/request")" = "$request" ] || exit 1
+# Only transaction state is private. The app creates shared dnsmasq runtime
+# files which must remain readable after dnsmasq drops root privileges.
+umask 022
 exec /usr/bin/timeout -k 2 "$limit" "$@"
