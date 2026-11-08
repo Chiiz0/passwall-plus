@@ -9,6 +9,9 @@ REPO_ROOT=$(cd -- "${OPENWRT_DIR}/.." && pwd)
 source "${OPENWRT_DIR}/versions.env"
 
 DIST_DIR=${FIRMWARE_OUTPUT_DIR:-"${REPO_ROOT}/dist/openwrt/${OPENWRT_VERSION}"}
+PASSWALL_VERSION=$(sed -n 's/^PKG_VERSION:=//p' "${REPO_ROOT}/luci-app-passwall/Makefile")
+PASSWALL_RELEASE=$(sed -n 's/^PKG_RELEASE:=//p' "${REPO_ROOT}/luci-app-passwall/Makefile")
+EXPECTED_PASSWALL_VERSION="${PASSWALL_VERSION}-r${PASSWALL_RELEASE}"
 SSH_PORT=${QEMU_SSH_PORT:-2222}
 PROBE_PORT=${QEMU_PROBE_PORT:-2233}
 TEST_DIR=$(mktemp -d -t passwall-plus-qemu.XXXXXX)
@@ -88,7 +91,7 @@ if ! ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 true >/dev/null 2>&1; then
 	exit 1
 fi
 
-ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 /bin/sh <<'EOF'
+ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 /bin/sh -s -- "${EXPECTED_PASSWALL_VERSION}" <<'EOF'
 set -eux
 trap 'status=$?; if [ "$status" -ne 0 ]; then tail -n 100 /tmp/log/passwall.log 2>/dev/null || true; fi; exit "$status"' EXIT
 
@@ -125,7 +128,8 @@ for _ in $(seq 1 30); do
 done
 ubus call network.interface.wan status | grep -q '"up": true'
 
-apk info -e 'luci-app-passwall=26.10.29-r3'
+apk info -e "luci-app-passwall=$1"
+apk info -e "luci-i18n-passwall-zh-cn=$1"
 apk info -e 'luci-app-passwall-ezcnet=0.2.0-r2'
 /etc/init.d/passwall-guard enabled
 for helper in check restore stage watch; do
