@@ -1,0 +1,4 @@
+#!/bin/sh
+uci -q set luci.themes.EzWrt='/luci-static/ezwrt'
+uci -q commit luci
+exit 0

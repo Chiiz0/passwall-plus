@@ -52,12 +52,14 @@ qemu-system-x86_64 \
 	-smp 2 \
 	-m 768 \
 	-drive "file=${RAW_IMAGE},format=raw,if=ide" \
-	-netdev "user,id=lan,net=10.0.0.0/24,hostfwd=tcp:127.0.0.1:${SSH_PORT}-10.0.0.1:22" \
-	-device e1000,netdev=lan,mac=52:54:00:00:00:10 \
 	-netdev 'user,id=wan,net=10.77.0.0/24,dhcpstart=10.77.0.15' \
 	-device e1000,netdev=wan,mac=52:54:00:00:00:20 \
+	-netdev "user,id=lan,net=10.0.0.0/24,hostfwd=tcp:127.0.0.1:${SSH_PORT}-10.0.0.1:22" \
+	-device e1000,netdev=lan,mac=52:54:00:00:00:10 \
 	-netdev "socket,id=probe,udp=127.0.0.1:$((PROBE_PORT + 1)),localaddr=127.0.0.1:${PROBE_PORT}" \
 	-device e1000,netdev=probe,mac=52:54:00:00:00:40 \
+	-netdev user,id=extra,net=10.79.0.0/24 \
+	-device e1000,netdev=extra,mac=52:54:00:00:00:50 \
 	-display none \
 	-monitor none \
 	-serial "file:${SERIAL_LOG}" \
@@ -90,11 +92,11 @@ ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 /bin/sh <<'EOF'
 set -eux
 trap 'status=$?; if [ "$status" -ne 0 ]; then tail -n 100 /tmp/log/passwall.log 2>/dev/null || true; fi; exit "$status"' EXIT
 
-test "$(uci -q get system.@system[0].hostname)" = 'PassWall-Plus'
+test "$(uci -q get system.@system[0].hostname)" = 'EzWrt'
 test "$(uci -q get network.lan.device)" = 'br-lan'
-test "$(uci -q get network.br_lan.ports)" = 'eth0'
+test "$(uci -q get network.br_lan.ports)" = 'eth1 eth2 eth3'
 test "$(uci -q get network.lan.ipaddr)" = '10.0.0.1'
-test "$(uci -q get network.wan.device)" = 'eth1'
+test "$(uci -q get network.wan.device)" = 'eth0'
 test "$(uci -q get network.wan.proto)" = 'dhcp'
 test "$(uci -q get dhcp.lan.ra)" = 'disabled'
 test "$(uci -q get dhcp.lan.dhcpv6)" = 'disabled'
@@ -107,6 +109,13 @@ test "$(sysctl -n net.ipv6.conf.default.disable_ipv6)" = '1'
 
 ip link show eth0 >/dev/null
 ip link show eth1 >/dev/null
+for port in eth1 eth2 eth3; do
+	test "$(basename "$(readlink /sys/class/net/$port/master)")" = br-lan
+done
+test ! -e /sys/class/net/eth0/master
+test "$(uci -q get luci.main.mediaurlbase)" = /luci-static/ezwrt
+test "$(uci -q get luci.themes.EzWrt)" = /luci-static/ezwrt
+apk info -e luci-theme-ezwrt
 test -r /lib/functions/network.sh
 for _ in $(seq 1 30); do
 	if ubus call network.interface.wan status | grep -q '"up": true'; then
@@ -210,6 +219,9 @@ for page in settings node_config/qemu_vpn acl_config/qemu_device; do
 		"http://127.0.0.1/cgi-bin/luci/admin/services/passwall/$page")
 	test "$status" = 200
 	grep -q "$control" /tmp/passwall-qemu-form.html
+	grep -q 'ez-sidebar' /tmp/passwall-qemu-form.html
+	grep -q 'menu-ezwrt' /tmp/passwall-qemu-form.html
+	! grep -q 'media_error' /tmp/passwall-qemu-form.html
 	printf 'LuCI form passed: %s\n' "$page"
 done
 status=$(curl --max-time 45 --silent --show-error --location \
@@ -219,6 +231,10 @@ status=$(curl --max-time 45 --silent --show-error --location \
 test "$status" = 200
 grep -q 'cbid.passwall_ezcnet.main.key' /tmp/passwall-ezcnet-qemu-form.html
 printf 'LuCI form passed: passwall-EzCNet\n'
+for resource in ezwrt/cascade.css ezwrt/logo.svg resources/menu-ezwrt.js; do
+	status=$(curl --max-time 10 --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1/luci-static/$resource")
+	test "$status" = 200
+done
 ubus call session destroy "{\"ubus_rpc_session\":\"$session\"}" >/dev/null
 unset session
 set -x

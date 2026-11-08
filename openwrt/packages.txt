@@ -1,5 +1,6 @@
 # LuCI and Chinese translations
 luci-ssl
+luci-theme-ezwrt
 luci-app-package-manager
 luci-i18n-base-zh-cn
 luci-i18n-firewall-zh-cn

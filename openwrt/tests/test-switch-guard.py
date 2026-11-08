@@ -79,7 +79,7 @@ def frame(protocol, port):
 
 
 def probe(blocked):
-    guest(f"tcpdump -U -ni eth1 -w /tmp/guard-probe.pcap 'dst host 10.77.0.2 and (udp dst port {echo_port} or udp dst port 53 or tcp dst port 19994 or icmp)' >/tmp/guard-capture.log 2>&1 &\necho $! >/tmp/guard-capture.pid\n")
+    guest(f"tcpdump -U -ni eth0 -w /tmp/guard-probe.pcap 'dst host 10.77.0.2 and (udp dst port {echo_port} or udp dst port 53 or tcp dst port 19994 or icmp)' >/tmp/guard-capture.log 2>&1 &\necho $! >/tmp/guard-capture.pid\n")
     time.sleep(0.4)
     for _ in range(12):
         for protocol, port in [(17, echo_port), (17, 53), (6, 19994), (1, 0)]:
@@ -121,7 +121,7 @@ upstream = Upstream()
 try:
     guest("cp /etc/config/passwall /tmp/guard-original\n"
           "cp /etc/ssl/certs/ca-certificates.crt /tmp/guard-original-ca\n"
-          "ip link set eth2 master br-lan\nip link set eth2 up\n"
+          "test -e /sys/class/net/br-lan/brif/eth2\n"
           "/etc/init.d/passwall stop\nrm -rf /etc/passwall/.switch\n")
     router_mac = bytes.fromhex(guest("cat /sys/class/net/br-lan/address\n").stdout.strip().replace(":", ""))
     guest('''

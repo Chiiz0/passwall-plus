@@ -44,10 +44,10 @@ try:
         serial = (directory / 'serial.log').open('wb')
         vm = subprocess.Popen(['qemu-system-x86_64', '-machine', 'pc,accel=tcg', '-cpu', 'max',
                                '-smp', '2', '-m', '512', '-drive', f'file={disk},format=raw,if=ide',
-                               '-netdev', f'user,id=lan,net=10.0.0.0/24,hostfwd=tcp:127.0.0.1:{server_port}-10.0.0.1:22',
-                               '-device', 'e1000,netdev=lan,mac=52:54:00:01:00:10',
                                '-netdev', f'user,id=wan,net=10.78.0.0/24,dhcpstart=10.78.0.15,hostfwd=udp:127.0.0.1:{vpn_port}-10.78.0.15:1194',
                                '-device', 'e1000,netdev=wan,mac=52:54:00:01:00:20',
+                               '-netdev', f'user,id=lan,net=10.0.0.0/24,hostfwd=tcp:127.0.0.1:{server_port}-10.0.0.1:22',
+                               '-device', 'e1000,netdev=lan,mac=52:54:00:01:00:10',
                                '-display', 'none', '-monitor', 'none', '-serial', 'stdio'],
                               stdout=serial, stderr=subprocess.STDOUT)
         for _ in range(90):

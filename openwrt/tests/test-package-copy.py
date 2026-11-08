@@ -16,7 +16,8 @@ with tempfile.TemporaryDirectory() as temporary:
     imagebuilder.mkdir(parents=True)
     dist = root / "dist"
     dist.mkdir()
-    names = ["luci-app-passwall-26.10.29-r2.apk", "luci-app-passwall-ezcnet-0.2.0-r1.apk"]
+    names = ["luci-app-passwall-26.10.29-r2.apk", "luci-app-passwall-ezcnet-0.2.0-r1.apk",
+             "luci-theme-ezwrt-1.0.0-r1.apk"]
     for index, name in enumerate(names):
         path = packages / name
         path.write_text(name)
@@ -24,7 +25,7 @@ with tempfile.TemporaryDirectory() as temporary:
     env = dict(os.environ, SDK_DIR=str(root / "sdk"), IMAGEBUILDER_DIR=str(root / "imagebuilder"),
                DIST_DIR=str(dist), OPENWRT_ARCH="x86_64")
     # Copy the extension first too, to check that main-package cleanup preserves it.
-    commands = "\ncopy_built_package luci-app-passwall-ezcnet\ncopy_built_package luci-app-passwall\n"
+    commands = "\ncopy_built_package luci-app-passwall-ezcnet\ncopy_built_package luci-app-passwall\ncopy_built_package luci-theme-ezwrt\n"
     subprocess.run(["bash", "-eu"], input=function + commands, text=True, env=env, check=True)
     for directory in [imagebuilder, dist]:
         assert sorted(path.name for path in directory.iterdir()) == names

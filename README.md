@@ -2,22 +2,25 @@
 
 PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/Openwrt-Passwall/openwrt-passwall) 的增强分支，重点解决局域网设备身份绑定、按设备选择出口、明确拒绝 IPv6，以及全局和单设备 OpenVPN 全流量转发。
 
-当前源码版本：`26.10.29-r3`，云控插件：`0.2.0-r2`
+当前源码版本：`26.10.29-r3`，云控插件：`0.2.0-r2`，EzWrt 主题：`1.0.0-r1`
 
 本轮同步上游至 `cde9833e`（PassWall `26.10.29`），包含核心更新校验、节点筛选界面、DNS/规则与 Xray 配置修复。专属固件 `25.12.6-r3` 使用 Xray `26.10.31`、Go `1.27.3` 和 Sing-box `1.14.4`，并默认禁用内核 MPTCP，以缓解近期 IPv4 MPTCP 监听漏洞。固件基线同步到 OpenWrt `25.12.6` / Linux `6.12.112`，包含新版 Web/TLS 等组件的安全修复；MPTCP 继续禁用作为额外缓解措施。
 
 > 仓库名称为 `passwall-plus`。为兼容现有 OpenWrt 软件包、LuCI 路径、UCI 配置和升级流程，内部包名继续使用 `luci-app-passwall`，配置仍位于 `/etc/config/passwall`。
 
-## 专属 OpenWrt 固件
+## EzWrt 专属 OpenWrt 固件
 
 仓库现在包含基于官方 OpenWrt `25.12.6` 的可复现 x86/64 固件构建。它固定官方 SDK、ImageBuilder、全部 OpenWrt feed 及 PassWall 依赖 feed，不使用 Kwrt 的滚动软件源、fullcone 改动或自定义 miniupnp 包。
 
-成品固件直接包含 PassWall Plus、OpenVPN、Xray、Sing-box、LuCI 简体中文和 VMware/QEMU 驱动，并生成 BIOS/UEFI、ext4/squashfs 及 VMware VMDK 镜像。默认双网卡定义为：
+成品固件直接包含 PassWall Plus、OpenVPN、Xray、Sing-box、LuCI 简体中文和 VMware/QEMU 驱动，并生成 BIOS/UEFI、ext4/squashfs 及 VMware VMDK 镜像。默认启用独立的 **EzWrt** 主题：深松绿色侧栏、青绿色操作按钮、卡片式内容、随系统切换的明暗配色及手机导航。主机名为 `EzWrt`；PassWall Plus 和 EzCNet 保留各自的插件名称。默认网口定义为：
 
 | 接口 | 用途 | 默认配置 |
 | --- | --- | --- |
-| `eth0` | LAN | `10.0.0.1/24`，提供 DHCP |
-| `eth1` | WAN | DHCP，从任意可用的 IPv4 DHCP 上联获取地址、网关和 DNS |
+| `eth0` | WAN | DHCP，从任意可用的 IPv4 DHCP 上联获取地址、网关和 DNS |
+| `eth1` | LAN | 桥接到 `br-lan`，`10.0.0.1/24`，提供 DHCP |
+| `eth2`、`eth3` 等 | LAN | 首次启动时自动将其余现有 `ethN` 网口加入 `br-lan`，无需插线 |
+
+本次源码构建采用上述新顺序，与历史 `25.12.6-r3` 镜像相反；刷入新镜像前请将上联接到第一张网卡，管理电脑接到第二张及后续网卡。至少需要两张网卡。
 
 IPv6 会从内核 sysctl、WAN/LAN 接口、RA/DHCPv6 和 PassWall 同时关闭，LAN 防火墙仍保留一条显式 IPv6 `REJECT` 规则。构建和 QEMU 验证方法见 [openwrt/README.md](openwrt/README.md)。固件不内置订阅、`.ovpn`、私钥或默认密码。
 
@@ -25,7 +28,7 @@ IPv6 会从内核 sysctl、WAN/LAN 接口、RA/DHCPv6 和 PassWall 同时关闭�
 
 Release 还提供与该固件匹配的 LuCI 主程序和简体中文 APK。Plus 的 LuCI 在线更新只使用本仓库的发布包，并按 APK 中的应用版本判断更新；Xray、Sing-box 等独立组件继续使用各自上游。旧版 OpenWrt 的 IPK 需在对应 SDK 中自行编译。
 
-当前固件已用双 e1000 网卡实际启动验证：WAN DHCP、LuCI、OpenVPN/Xray/Sing-box、IPv6 禁用、`fw4 check` 和 `fw4 reload` 均通过，内核日志没有 nftables 段错误。由此绕开 Kwrt 的固件基线问题，而不是在 PassWall 中掩盖 `libnftables` 崩溃。
+当前源码构建已用双网口和四网口 QEMU 实际启动验证：`eth0` WAN DHCP、`eth1/eth2/eth3` 自动 LAN 桥接、EzWrt/LuCI、OpenVPN/Xray/Sing-box、IPv6 禁用、`fw4 check` 和 `fw4 reload` 均通过，内核日志没有 nftables 段错误。由此绕开 Kwrt 的固件基线问题，而不是在 PassWall 中掩盖 `libnftables` 崩溃。
 
 ## 核心能力
 

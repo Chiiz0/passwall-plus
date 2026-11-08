@@ -1,6 +1,7 @@
 #!/bin/sh
 
-uci -q set system.@system[0].hostname='PassWall-Plus'
+uci -q set system.@system[0].hostname='EzWrt'
+uci -q commit system
 
 # Replace only the automatically generated br-lan device and keep unrelated
 # devices intact if this overlay is reused on another x86/64 installation.
@@ -12,7 +13,6 @@ uci -q batch <<'EOF'
 set network.br_lan='device'
 set network.br_lan.name='br-lan'
 set network.br_lan.type='bridge'
-add_list network.br_lan.ports='eth0'
 set network.lan='interface'
 set network.lan.device='br-lan'
 set network.lan.proto='static'
@@ -20,7 +20,7 @@ set network.lan.ipaddr='10.0.0.1'
 set network.lan.netmask='255.255.255.0'
 delete network.lan.ip6assign
 set network.wan='interface'
-set network.wan.device='eth1'
+set network.wan.device='eth0'
 set network.wan.proto='dhcp'
 set network.wan.delegate='0'
 delete network.wan6
@@ -49,10 +49,25 @@ set firewall.passwall_plus_reject_ipv6.enabled='1'
 commit firewall
 EOF
 
+# All other physical Ethernet ports belong to LAN, even without a cable attached.
+# Match only eth + digits, excluding VLAN devices such as eth0.10.
+for device in /sys/class/net/eth*; do
+	[ -e "$device" ] || continue
+	port=${device##*/}
+	case "${port#eth}" in
+		0|''|*[!0-9]*) continue ;;
+	esac
+	uci -q add_list network.br_lan.ports="$port"
+done
+uci -q commit network
+
+uci -q set luci.main.mediaurlbase='/luci-static/ezwrt'
+uci -q commit luci
+
 uci -q set passwall.@global[0].reject_ipv6='1'
 uci -q delete passwall.@global[0].ipv6_reject_zones
 uci -q add_list passwall.@global[0].ipv6_reject_zones='lan'
 uci -q commit passwall
 
-logger -t passwall-plus 'applied dedicated x86/64 LAN, WAN, and IPv6 policy'
+logger -t ezwrt 'applied EzWrt theme, eth0 WAN, remaining Ethernet LAN, and IPv6 policy'
 exit 0

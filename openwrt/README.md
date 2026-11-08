@@ -1,4 +1,4 @@
-# PassWall Plus Dedicated OpenWrt Firmware
+# EzWrt Dedicated OpenWrt Firmware
 
 This directory builds a reproducible x86/64 firmware from the official OpenWrt
 25.12.6 SDK and ImageBuilder. It does not inherit Kwrt's rolling package feeds,
@@ -13,7 +13,11 @@ fullcone patches, or custom miniupnp packages.
 - DHCP static lease and IP/MAC binding support from PassWall Plus.
 - Network protection during node switches, including failed startup and core updates.
 - Kernel MPTCP disabled as a mitigation for the IPv4 MPTCP listener vulnerability.
-- `eth0` as LAN at `10.0.0.1/24`; `eth1` as DHCP WAN.
+- EzWrt LuCI theme and hostname, with a forest-green sidebar, teal accents,
+  responsive navigation and automatic light/dark appearance. Bootstrap remains
+  available as a fallback in System → System → Language and Style.
+- `eth0` as DHCP WAN; `eth1` and all other detected `ethN` ports as bridged LAN
+  at `10.0.0.1/24`. Disconnected ports are included; VLAN devices are excluded.
 - IPv6 disabled in sysctl and network services, plus an explicit LAN reject rule.
 - VMware e1000/e1000e/vmxnet3 drivers and the official x86 kernel's virtio support.
 - BIOS and UEFI, ext4 and squashfs combined images with a 1 GiB root partition.
@@ -46,8 +50,9 @@ kernel remain on the 25.12.6 baseline. Both pins are recorded in `build-info.txt
 
 ## Test
 
-The test boots the BIOS ext4 image with three emulated e1000 NICs and checks the
-network mapping, WAN DHCP, IPv6 policy, installed binaries, LuCI, `fw4 check`,
+The test boots the BIOS ext4 image with four emulated e1000 NICs and checks the
+network mapping (including automatic eth2/eth3 bridge membership), WAN DHCP,
+IPv6 policy, installed binaries, EzWrt templates and static assets, LuCI, `fw4 check`,
 `fw4 reload`, and kernel logs for nftables crashes:
 
 ```sh
@@ -93,7 +98,7 @@ git push origin firmware-v25.12.6-r3
 ```
 
 The release also includes the built `luci-app-passwall`, `luci-app-passwall-ezcnet`,
-and Simplified Chinese translation APKs. The LuCI self-updater reads this repository's release assets and
+`luci-theme-ezwrt`, and Simplified Chinese translation APKs. The LuCI self-updater reads this repository's release assets and
 compares the package version, independently of the OpenWrt firmware tag. These
 APKs target the dedicated 25.12 firmware; older opkg releases need their own SDK
 builds.
@@ -107,11 +112,15 @@ the agent requires the Plus parser interface introduced in this release.
 Use the `generic-ext4-combined.vmdk` image for legacy BIOS or
 `generic-ext4-combined-efi.vmdk` for UEFI. Attach two NICs in this order:
 
-1. LAN: host-only/custom network connected to the test client.
-2. WAN: any IPv4 uplink that provides DHCP, such as VMware NAT, a bridged
-   network, or an Ethernet network with an upstream DHCP router.
+1. WAN (`eth0`): any IPv4 uplink that provides DHCP, such as VMware NAT, a
+   bridged network, or an Ethernet network with an upstream DHCP router.
+2. LAN (`eth1`): host-only/custom network connected to the test client.
+3. Optional additional NICs (`eth2`, `eth3`, …): automatically bridged into LAN.
 
-The WAN setup is not VMware-specific: `eth1` is a normal DHCP client and uses
+This order differs from historical 25.12.6-r3 images. Reconnect the adapters
+when installing a new EzWrt build. The firmware requires at least two NICs.
+
+The WAN setup is not VMware-specific: `eth0` is a normal DHCP client and uses
 the IPv4 address, default gateway, and DNS supplied by the upstream network.
 
 After boot, open `http://10.0.0.1/`, set the root password, then import
