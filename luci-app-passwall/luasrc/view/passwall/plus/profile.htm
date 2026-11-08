@@ -1,0 +1,10 @@
+<%+cbi/valueheader%>
+<div class="pw-plus pw-profile-editor" data-field="<%=cbid%>" data-section="<%=section%>" data-config="<%=self.map.config%>">
+	<div class="pw-editor-control"><label><strong><%:Import .ovpn file%></strong> <input class="pw-profile-file" type="file" accept=".ovpn,.conf,text/plain" /></label></div>
+	<p class="pw-muted"><%:The file is read locally into this form. Review it, then Save & Apply. Importing does not start a connection.%></p>
+	<div class="pw-profile-summary" aria-live="polite"></div>
+	<details><summary><%:View or paste profile text%></summary>
+	<textarea class="cbi-input-textarea" style="width:100%;font-family:monospace" rows="14" wrap="off" spellcheck="false" data-update="change"<%=attr('name', cbid) .. attr('id', cbid)%>><%-=pcdata(self:cfgvalue(section) or self.default or '')-%></textarea>
+	</details>
+</div>
+<%+cbi/valuefooter%>

@@ -21,7 +21,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes \
             build-essential clang flex bison g++ gawk gcc-multilib gettext \
-            git libncurses-dev libssl-dev lua5.1 python3-setuptools qemu-system-x86 \
+            git libncurses-dev libssl-dev lua5.1 nodejs python3-setuptools qemu-system-x86 \
             qemu-utils rsync swig unzip zlib1g-dev zstd
 
       - name: Verify Plus updater
@@ -32,6 +32,11 @@ jobs:
 
       - name: Verify release package selection
         run: python3 openwrt/tests/test-package-copy.py
+
+      - name: Verify Plus overview and profile import
+        run: |
+          lua5.1 openwrt/tests/test-plus-ui.lua
+          node openwrt/tests/test-plus-profile.js
 
       - name: Verify EzCNet command validation
         run: lua5.1 openwrt/tests/test-ezcnet.lua

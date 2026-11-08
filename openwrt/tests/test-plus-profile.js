@@ -1,0 +1,17 @@
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+const source = fs.readFileSync('luci-app-passwall/htdocs/luci-static/resources/view/passwall/plus-editor.js', 'utf8');
+const ui = new Function('baseclass', '_', source)({extend: o => o}, s => s);
+let p = ui.inspectProfile('\uFEFFclient\r\nremote vpn.example.test 443 tcp\r\n<key>\nsecret\nremote not-a-server 1\n</key>');
+assert.deepEqual(p.remotes, ['vpn.example.test:443']);
+assert.deepEqual(p.protocols, ['tcp']);
+assert.equal(p.errors.length, 0);
+assert.ok(!JSON.stringify({...p,value:undefined}).includes('secret'));
+p = ui.inspectProfile('client\n<connection>\nremote 192.0.2.1 1194 udp\n</connection>\nauth-user-pass auth.txt\nca "my cert.pem"');
+assert.equal(p.auth, true);
+assert.deepEqual(p.external, ['ca']);
+assert.equal(ui.inspectProfile('<cert>\nremote forged\n</cert>').remotes.length, 0);
+assert.ok(ui.inspectProfile('remote vpn.test\n\0').errors.length);
+assert.ok(ui.inspectProfile('remote 2001:db8::1 1194').errors.length);
+assert.ok(ui.inspectProfile('remote vpn.test\n' + '中'.repeat(50000)).errors.length);
+console.log('Profile import inspection tests passed');

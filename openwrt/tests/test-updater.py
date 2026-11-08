@@ -87,6 +87,9 @@ fixture({"luci-app-passwall-26.10.22-r3.apk", "luci-i18n-passwall-zh-cn-26.10.22
 local result = to_check_self()
 assert(result.code == 0 and result.has_update and result.remote_version == "26.10.22-3")
 assert(#cached == 2)
+fixture({"luci-app-passwall-26.10.29-r4.apk", "luci-i18n-passwall-zh-cn-26.10.29-r4.apk"})
+assert(to_check_self().has_update, "Translation package revisions must be accepted")
+fixture({"luci-app-passwall-26.10.22-r3.apk", "luci-i18n-passwall-zh-cn-26.10.22.apk"})
 installed="26.10.22-3"
 assert(to_check_self().has_update == false)
 installed="26.10.22-4"

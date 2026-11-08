@@ -123,6 +123,7 @@ test "$(cat /tmp/passwall_switch/result)" = ready
 test ! -e /tmp/passwall_switch_guard
 ip -4 route show table 20000 | grep -q '^default dev pswov0 .*metric 10'
 curl --silent --show-error --fail --interface pswov0 --max-time 5 --head https://10.78.0.2:{upstream.tls_port}/generate_204
+lua -e 'local d=require("luci.passwall.overview").collect(); assert(d.global.runtime_node.id == "real_vpn"); local found=false; for _,v in ipairs(d.vpns) do if v.id == "real_vpn" then assert(v.status == "tunnel_up" and v.device == "pswov0"); found=true end end; assert(found)'
 ''')
         print('PASS: real OpenVPN TLS handshake, tunnel-bound HTTPS health, automatic guard removal', flush=True)
         guest(client_port, '''
@@ -143,12 +144,14 @@ uci commit passwall
 test "$(cat /tmp/passwall_switch/result)" = ready
 test ! -e /tmp/passwall_switch_guard
 ip -4 route show table 20001 | grep -q '^default dev pswov1 .*metric 10'
+lua -e 'local d=require("luci.passwall.overview").collect(); assert(d.counts.tunnels == 2); local found=false; for _,r in ipairs(d.devices) do if r.id == "health_acl" then assert(r.state == "loaded" and r.vpn_state == "tunnel_up"); found=true end end; assert(found)'
 uci set passwall.@global[0].enabled=0
 uci commit passwall
 /etc/init.d/passwall restart
 test "$(cat /tmp/passwall_switch/result)" = ready
 test ! -e /tmp/passwall_switch_guard
 ip -4 rule show | grep -q 'oif pswov1 lookup 20001'
+lua -e 'local d=require("luci.passwall.overview").collect(); assert(not d.global.enabled and d.counts.tunnels == 1)'
 ''')
         print('PASS: simultaneous global/device VPNs and ACL-only tunnel health', flush=True)
 except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:

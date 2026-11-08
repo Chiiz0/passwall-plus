@@ -99,7 +99,7 @@ local doh_validate = function(self, value, t)
 	return nil, translatef("%s request address","DoH") .. " " .. translate("Format must be:") .. " URL,IP"
 end
 
-m:appendTemplate("/global/status")
+m:appendTemplate("/plus/global_intro")
 
 s = m:section(NamedSection, "@global[0]", "global")
 

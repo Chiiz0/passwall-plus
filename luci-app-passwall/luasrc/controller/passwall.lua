@@ -29,16 +29,18 @@ function index()
 	entry({"admin", "services", appname, "hide"}, call("hide_menu")).leaf = true
 	local e
 	if api.uci_get_c("@global[0]", "hide_from_luci") ~= "1" then
-		e = entry({"admin", "services", appname}, alias("admin", "services", appname, "settings"), _("Pass Wall"), -1)
+		e = entry({"admin", "services", appname}, alias("admin", "services", appname, "overview"), "PassWall Plus", -1)
 	else
-		e = entry({"admin", "services", appname}, alias("admin", "services", appname, "settings"), nil, -1)
+		e = entry({"admin", "services", appname}, alias("admin", "services", appname, "overview"), nil, -1)
 	end
 	e.dependent = true
 	e.acl_depends = { "luci-app-passwall" }
 	--[[ Client ]]
-	entry({"admin", "services", appname, "settings"}, cbi(appname .. "/client/global"), _("Basic Settings"), 1).dependent = true
-	entry({"admin", "services", appname, "node_list"}, cbi(appname .. "/client/node_list"), _("Node List"), 2).dependent = true
-	entry({"admin", "services", appname, "node_subscribe"}, cbi(appname .. "/client/node_subscribe"), _("Node Subscribe"), 3).dependent = true
+	entry({"admin", "services", appname, "overview"}, template(appname .. "/plus/overview"), _("Plus Overview"), 0).leaf = true
+	entry({"admin", "services", appname, "openvpn"}, template(appname .. "/plus/openvpn"), "OpenVPN", 2).leaf = true
+	entry({"admin", "services", appname, "settings"}, cbi(appname .. "/client/global"), _("Global egress"), 3).dependent = true
+	entry({"admin", "services", appname, "node_list"}, cbi(appname .. "/client/node_list"), _("Node List"), 4).dependent = true
+	entry({"admin", "services", appname, "node_subscribe"}, cbi(appname .. "/client/node_subscribe"), _("Node Subscribe"), 5).dependent = true
 	entry({"admin", "services", appname, "other"}, cbi(appname .. "/client/other"), _("Other Settings"), 92).leaf = true
 	if api.is_finded("haproxy") then
 		entry({"admin", "services", appname, "haproxy"}, cbi(appname .. "/client/haproxy"), _("Load Balancing"), 93).leaf = true
@@ -50,7 +52,7 @@ function index()
 	entry({"admin", "services", appname, "node_config"}, cbi(appname .. "/client/node_config")).leaf = true
 	entry({"admin", "services", appname, "shunt_rules"}, cbi(appname .. "/client/shunt_rules")).leaf = true
 	entry({"admin", "services", appname, "socks_config"}, cbi(appname .. "/client/socks_config")).leaf = true
-	entry({"admin", "services", appname, "acl"}, cbi(appname .. "/client/acl"), _("Access control"), 98).leaf = true
+	entry({"admin", "services", appname, "acl"}, cbi(appname .. "/client/acl"), _("Device egress"), 1).leaf = true
 	entry({"admin", "services", appname, "acl_config"}, cbi(appname .. "/client/acl_config")).leaf = true
 	entry({"admin", "services", appname, "log"}, template(appname .. "/log/log"), _("Runtime Logs"), 999).leaf = true
 
@@ -60,6 +62,8 @@ function index()
 	entry({"admin", "services", appname, "server_user_config"}, cbi(appname .. "/server/user_config")).leaf = true
 
 	--[[ API ]]
+	entry({"admin", "services", appname, "plus_status"}, call("plus_status")).leaf = true
+	entry({"admin", "services", appname, "plus_create"}, post("plus_create")).leaf = true
 	entry({"admin", "services", appname, "server_update_config"}, call("server_update_config")).leaf = true
 	entry({"admin", "services", appname, "server_status"}, call("server_status")).leaf = true
 	entry({"admin", "services", appname, "server_log"}, call("server_log")).leaf = true
@@ -336,6 +340,46 @@ end
 
 function clear_log()
 	luci.sys.call("echo '' > /tmp/log/passwall.log")
+end
+
+function plus_status()
+	http.header("Cache-Control", "no-store")
+	http_write_json(require("luci.passwall.overview").collect())
+end
+
+function plus_create()
+	local access = util.ubus("session", "access", {
+		ubus_rpc_session = luci.dispatcher.context.authsession,
+		scope = "uci", object = c_config, ["function"] = "write"
+	})
+	if not access or not access.access then
+		http.status(403, "Forbidden")
+		return
+	end
+	local kind = http.formvalue("kind")
+	if kind ~= "openvpn" and kind ~= "device" then
+		http.status(400, "Invalid configuration kind")
+		return
+	end
+	if kind == "openvpn" and not api.is_finded("openvpn") then
+		http.status(409, "OpenVPN is not installed")
+		return
+	end
+	local selected = http.formvalue("node")
+	if selected and (kind ~= "device" or not selected:match("^[A-Za-z0-9_+%-]+$") or uci_get(selected, "type") ~= "OpenVPN") then
+		http.status(400, "Invalid OpenVPN node")
+		return
+	end
+	local id = (kind == "device" and "acl_" or "vpn_") .. api.gen_random_char(8)
+	if kind == "openvpn" then
+		uci:section(c_config, "nodes", id, {type = "OpenVPN", remarks = "OpenVPN", vpn_dns = "1.1.1.1"})
+	else
+		-- A draft never changes forwarding until the user enables and applies it.
+		uci:section(c_config, "acl_rule", id, {enabled = "0", bind_enable = "1", mode = "1", use_global_config = "0"})
+		if selected then uci_set(id, "node", selected) end
+	end
+	uci_save()
+	http.redirect(api.url(kind == "openvpn" and "node_config" or "acl_config", id))
 end
 
 function index_status()

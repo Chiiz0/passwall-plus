@@ -33,7 +33,7 @@ local config = map.config
 				}
 			});
 			const fromUrlCache = JSON.parse(sessionStorage.getItem("fromUrl"));
-			if (fromUrlCache && fromUrlCache.savetime && (Date.now() - fromUrlCache.timestamp) < fromUrlCache.savetime) {
+			if (typeof fromUrl === "function" && fromUrlCache && fromUrlCache.savetime && (Date.now() - fromUrlCache.timestamp) < fromUrlCache.savetime) {
 				fromUrl(fromUrlCache.link, true)
 			} else {
 				sessionStorage.removeItem("fromUrl");

@@ -3,8 +3,9 @@ local api = require "luci.passwall.api"
 api.set_default_cbi()
 
 m = Map()
+m:appendTemplate("/plus/device_intro")
 
-s = m:section(NamedSection, "@global[0]", "global", translate("ACLs"), "<font color='red'>" .. translate("ACLs is a tools which used to designate specific IP proxy mode.") .. "</font>")
+s = m:section(NamedSection, "@global[0]", "global", translate("Device egress"))
 
 o = s:option(Flag, "acl_enable", translate("Main switch"))
 o.rmempty = false
@@ -41,6 +42,9 @@ s.extedit = api.url("acl_config", "%s")
 function s.create(e, t)
 	local uid = "acl_" .. api.gen_random_char(5)
 	TypedSection.create(e, uid)
+	m:set(uid, "enabled", "0")
+	m:set(uid, "bind_enable", "1")
+	m:set(uid, "mode", "1")
 	luci.http.redirect(e.extedit:format(uid))
 end
 function s.remove(e, t)
@@ -92,7 +96,7 @@ o.cfgvalue = function(t, n)
 		if #e > 0 then
 			e = e .. "<br />"
 		end
-		e = e .. a
+		e = e .. api.util.pcdata(a)
 	end)
 	return e
 end

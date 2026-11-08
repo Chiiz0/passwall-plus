@@ -20,23 +20,11 @@ api.set_type_cbi(s)
 o = s:option(TextValue, "config", translate("OpenVPN client profile"), translate("Paste the complete .ovpn client profile. PassWall removes profile directives that can execute commands or change system routing."))
 o.rows = 16
 o.wrap = "off"
+o.template = m:template_path("/plus/profile")
 o.rmempty = false
 o.validate = function(self, value)
-	value = api.trim(value or "")
-	if value == "" then
-		return nil, translate("OpenVPN client profile is required.")
-	end
-	if #value > 131072 then
-		return nil, translate("OpenVPN client profile must not exceed 128 KiB.")
-	end
-	if value:find("%z") then
-		return nil, translate("OpenVPN client profile contains invalid data.")
-	end
-	local lower = "\n" .. value:lower()
-	if not lower:match("\n%s*remote%s+") and not lower:match("\n%s*%-%-remote%s+") then
-		return nil, translate("OpenVPN client profile must contain a remote directive.")
-	end
-	return value
+	local profile, err = require("luci.passwall.openvpn_profile").validate(value)
+	return profile, err and translate(err)
 end
 
 o = s:option(Value, "username", translate("Username"), translate("Leave both username and password empty for certificate-only authentication."))

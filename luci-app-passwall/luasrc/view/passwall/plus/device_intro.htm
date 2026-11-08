@@ -1,0 +1,3 @@
+<% local api = self.map.api %>
+<link rel="stylesheet" href="<%=resource%>/view/passwall/plus.css" />
+<div class="pw-plus pw-editor"><div class="pw-hero"><div><p class="pw-eyebrow">PASSWALL PLUS / DEVICE EGRESS</p><h2><%:Give each device its own exit.%></h2><p><%:Bind the device identity, choose a proxy or OpenVPN exit, and keep policy order explicit.%></p></div><a class="cbi-button" href="<%=api.url('overview')%>"><%:View device egress map%></a></div><div class="pw-notice"><%:Rules match from top to bottom; the first matching rule wins. IP/MAC binding creates a permanent DHCP lease. OpenVPN device forwarding requires binding.%></div></div>

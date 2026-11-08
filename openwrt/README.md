@@ -10,6 +10,8 @@ fullcone patches, or custom miniupnp packages.
 - `luci-app-passwall-ezcnet` cloud agent and LuCI settings, disabled by default
   with no embedded device Key; the default HTTPS endpoint is passwall.ezcnet.com.
 - Global and per-device OpenVPN, including Xray/Sing-box pre-proxy nodes.
+- A Plus overview centered on device exits, IP/MAC binding, VPN tunnels and switch protection.
+- Local .ovpn import with profile checks, lease-based device selection and disabled policy drafts.
 - DHCP static lease and IP/MAC binding support from PassWall Plus.
 - Network protection during node switches, including failed startup and core updates.
 - Kernel MPTCP disabled as a mitigation for the IPv4 MPTCP listener vulnerability.
@@ -62,20 +64,26 @@ IPv6 policy, installed binaries, EzWrt templates and static assets, LuCI, `fw4 c
 The test uses TCP port 2222 by default. Set `QEMU_SSH_PORT` if that port is in
 use. The QEMU disk is a temporary copy, so the firmware artifact is not modified.
 It also compiles the installed Lua sources, renders authenticated LuCI global,
-OpenVPN-node and ACL pages, verifies global OpenVPN supervision and fail-closed
+Plus overview, OpenVPN-node and device policy pages, checks the read-only status API and POST-only draft endpoint, verifies global OpenVPN supervision and fail-closed
 routing with an unreachable test server, and checks managed DHCP leases and
 IP/MAC guard creation and cleanup. A second isolated VM establishes a real TLS
-OpenVPN tunnel and verifies HTTPS through its TUN device. A third emulated NIC injects real LAN TCP,
+OpenVPN tunnel, verifies HTTPS through its TUN device, and checks that the Plus status API distinguishes global, simultaneous and device-only tunnels. A third emulated NIC injects real LAN TCP,
 UDP, DNS and ICMP packets and verifies that no matching packets reach the WAN
 while the switch guard is active, including an established offloaded UDP flow,
 fw4 reload and partial protection failures. Local SOCKS/TLS fixtures exercise
 verified startup, unreachable-node rollback, delayed listeners, controller death,
 new-request cancellation, failed binary replacement, orphan cleanup, runtime
 core death and recovery after an unavailable upstream returns.
+An independent LAN client also requests new unicast/broadcast DHCP leases,
+renews an existing lease, and loads LuCI by LAN IP during protection, an
+unreachable-node health check, sustained recovery, and verified restoration.
+Its test link filters QEMU's built-in DHCP replies so they cannot mask a router
+DHCP failure. The test temporarily forces dnsmasq DHCP on the emulated LAN.
 `QEMU_PROBE_PORT` (default 2233, also reserving the following UDP port) can be
 changed for concurrent runs. No host root privileges or external proxy account
 are needed. The OpenVPN fixture also reserves TCP `QEMU_SSH_PORT + 10` and
 UDP `QEMU_SSH_PORT + 20`; it requires the host `openssl` command.
+The DHCP/management client reserves TCP `QEMU_SSH_PORT + 30` and `+ 31`.
 
 The Plus self-updater's version selection and rejection of upstream package URLs
 can be tested separately with Python 3 and Lua 5.1:

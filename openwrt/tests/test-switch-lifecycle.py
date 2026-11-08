@@ -114,4 +114,30 @@ esac
     process = subprocess.run(['/bin/sh'], input=guard + '\nSWITCH_GUARD_STATE="$TEST_DIR/marker"\necholog() { :; }\nswitch_guard_end\n',
                              text=True, env=dict(env, PATH=temporary + ':' + os.environ['PATH']))
     assert process.returncode == 0 and not (directory / 'table').exists()
+
+    # The legacy backend must preserve DHCP even when conntrack cannot pair
+    # the reply with the broadcast/zero-address request. Capture its actual
+    # restore transaction; the firmware packet regression exercises nftables.
+    iptables = directory / 'test-iptables'
+    iptables.write_text('#!/bin/sh\nexit 1\n')
+    iptables.chmod(0o755)
+    restore = directory / 'test-iptables-restore'
+    restore.write_text('#!/bin/sh\ncat > "$TEST_DIR/restore"\n')
+    restore.chmod(0o755)
+    for family, client, server in [(4, 68, 67), (6, 546, 547)]:
+        process = subprocess.run(['/bin/sh'], input=guard + f'\nDIRECT_GID=453\nswitch_guard_ipt_family "$TEST_DIR/test-iptables" {family}\n',
+                                 text=True, capture_output=True, env=env)
+        assert process.returncode == 0, process.stderr
+        rules = (directory / 'restore').read_text().splitlines()
+        for chain in ('PW_SWITCH_PRE', 'PW_SWITCH_OUT'):
+            for source, target in [(client, server), (server, client)]:
+                rule = f'-A {chain} -p udp --sport {source} --dport {target} -j RETURN'
+                assert rule in rules, f'DHCP direction missing: {rule}'
+                if chain == 'PW_SWITCH_OUT':
+                    assert rules.index(rule) < rules.index('-A PW_SWITCH_OUT -j DROP')
+        assert '-A PW_SWITCH_FWD -j DROP' in rules
+        assert '-A PW_SWITCH_PRE ! -i lo -p udp --dport 53 -j DROP' in rules
+        if family == 6:
+            assert '-A PW_SWITCH_OUT -p ipv6-icmp --icmpv6-type 134 -j RETURN' in rules
 print('PASS: rollback, partial arm failure, superseded requests, stop/start/cleanup errors, orphan cleanup')
+print('PASS: iptables IPv4/IPv6 DHCP directions and router advertisements; transit/DNS remain blocked')

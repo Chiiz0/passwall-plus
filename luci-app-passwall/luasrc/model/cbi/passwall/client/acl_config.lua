@@ -10,6 +10,7 @@ if not arg[1] or not m:get(arg[1]) then
 end
 
 m:appendTemplate("/cbi/nodes_listvalue_com")
+m:appendTemplate("/plus/device_editor", {sid = arg[1]})
 
 local has_singbox = api.finded_com("sing-box")
 local has_xray = api.finded_com("xray")
@@ -52,10 +53,10 @@ if has_singbox or has_xray then
 end
 
 -- [[ ACLs Settings ]]--
-s = m:section(NamedSection, arg[1], translate("ACLs"), translate("ACLs"))
+s = m:section(NamedSection, arg[1], "acl_rule", translate("Device egress"))
 
-s:tab("Main", translate("Main"))
-s:tab("Proxy", translate("Proxy"))
+s:tab("Main", translate("Device and exit"))
+s:tab("Proxy", translate("Routing details"))
 s:tab("DNS", translate("DNS"))
 s:tab("Log", translate("Log"))
 
@@ -74,7 +75,8 @@ o.default = "0"
 o.rmempty = false
 o.write = function(self, section, value)
 	Flag.write(self, section, value)
-	if value == "1" then
+	local enabled = s.fields["enabled"]:formvalue(section) or m:get(section, "enabled")
+	if value == "1" and enabled == "1" then
 		m:set("@global[0]", "acl_enable", "1")
 	end
 end
@@ -93,22 +95,24 @@ o.validate = function(self, value, section)
 end
 
 local mac_t = {}
-local lease_names = {}
+local leases_by_mac = {}
 local lease_file = io.open("/tmp/dhcp.leases", "r")
 if lease_file then
 	for line in lease_file:lines() do
 		local _, mac, ip, hostname = line:match("^(%S+)%s+(%S+)%s+(%S+)%s+(%S+)")
 		if mac and ip then
-			lease_names[mac:upper()] = hostname ~= "*" and hostname or nil
+			leases_by_mac[mac:upper()] = {ip = ip, hostname = hostname ~= "*" and hostname or nil}
 		end
 	end
 	lease_file:close()
 end
 api.sys.net.mac_hints(function(e, t)
+	local lease = leases_by_mac[e:upper()]
 	mac_t[#mac_t + 1] = {
-		ip = t,
+		-- LuCI hints may contain a hostname instead of an address.
+		ip = (lease and lease.ip) or device_policy.normalize_ipv4(t) or "",
 		mac = e:upper(),
-		hostname = lease_names[e:upper()]
+		hostname = lease and lease.hostname or (not device_policy.normalize_ipv4(t) and t or nil)
 	}
 end)
 table.sort(mac_t, function(a,b)
@@ -144,9 +148,10 @@ o = s:taboption("Main", Value, "bind_mac", translate("Bound MAC address"))
 o.rmempty = false
 o:depends("bind_enable", "1")
 for _, client in ipairs(mac_t) do
-	local label = client.mac .. " (" .. client.ip
-	if client.hostname then label = label .. ", " .. client.hostname end
-	o:value(client.mac, label .. ")")
+	local details = {}
+	if client.ip ~= "" then details[#details + 1] = client.ip end
+	if client.hostname then details[#details + 1] = client.hostname end
+	o:value(client.mac, client.mac .. (#details > 0 and " (" .. table.concat(details, ", ") .. ")" or ""))
 end
 o.validate = function(self, value, section)
 	local mac = device_policy.normalize_mac(value)
@@ -162,7 +167,7 @@ o = s:taboption("Main", Value, "bind_ip", translate("Bound IPv4 address"))
 o.rmempty = false
 o:depends("bind_enable", "1")
 for _, client in ipairs(mac_t) do
-	o:value(client.ip, client.ip .. " (" .. client.mac .. ")")
+	if client.ip ~= "" then o:value(client.ip, client.ip .. " (" .. client.mac .. ")") end
 end
 o.validate = function(self, value, section)
 	local ip = device_policy.normalize_ipv4(value)
@@ -201,7 +206,8 @@ sources.description = "<ul><li>" .. translate("Example:")
 sources.cast = "string"
 sources:depends("bind_enable", "0")
 for _, key in pairs(mac_t) do
-	sources:value(key.mac, "%s (%s)" % {key.mac, key.ip})
+	local hint = key.ip ~= "" and key.ip or key.hostname
+	sources:value(key.mac, key.mac .. (hint and " (" .. hint .. ")" or ""))
 end
 sources.cfgvalue = function(self, section)
 	local value

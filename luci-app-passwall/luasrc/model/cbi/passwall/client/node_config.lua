@@ -8,6 +8,12 @@ if not arg[1] or not m:get(arg[1]) then
 	luci.http.redirect(m.redirect)
 end
 
+local is_openvpn = m:get(arg[1], "type") == "OpenVPN"
+if is_openvpn then
+	m.redirect = api.url("openvpn")
+	m:appendTemplate("/plus/node_intro")
+end
+
 formvalue_key = "cbid." .. m.config .. "." .. arg[1] .. "."
 
 m:appendTemplate("/node_config/header", {section = arg[1]})
@@ -27,10 +33,12 @@ local s = m:section(NamedSection, arg[1], "nodes", translate("Node Config"))
 s.addremove = false
 s.dynamic = false
 
-o = s:option(DummyValue, "passwall", "　")
-o.rawhtml  = true
-o.template = m:template_path("/node_config/link_share_man")
-o.value = arg[1]
+if not is_openvpn then
+	o = s:option(DummyValue, "passwall", "　")
+	o.rawhtml = true
+	o.template = m:template_path("/node_config/link_share_man")
+	o.value = arg[1]
+end
 
 o = s:option(Value, "remarks", translate("Node Remarks"))
 o.default = translate("Remarks")

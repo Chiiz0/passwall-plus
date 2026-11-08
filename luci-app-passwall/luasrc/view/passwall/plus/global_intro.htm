@@ -1,0 +1,9 @@
+<% local api = self.map.api %>
+<link rel="stylesheet" href="<%=resource%>/view/passwall/plus.css" />
+<div id="pw-plus" class="pw-plus pw-editor" data-base="<%=api.url()%>" data-mode="global" data-token="<%=token%>">
+	<div class="pw-hero"><div><p class="pw-eyebrow">PASSWALL PLUS / GLOBAL EGRESS</p><h2><%:One default exit. Device policies stay in control.%></h2><p><%:Choose the default proxy or OpenVPN exit here. Individual device rules take priority over the global policy.%></p></div><a class="cbi-button" href="<%=api.url('overview')%>"><%:Plus Overview%></a></div>
+	<div class="pw-refresh"><span id="pw-updated" role="status"><%:Collecting data...%></span><button id="pw-refresh" type="button" class="cbi-button"><%:Refresh%></button></div>
+	<div id="pw-error" class="pw-notice pw-warning" role="alert" hidden></div>
+	<div id="pw-runtime"></div><div id="pw-protection"></div><div id="pw-vpns" class="pw-vpn-grid"></div>
+</div>
+<script>L.require('view.passwall.plus').then(function(ui) { ui.dashboard(document.getElementById('pw-plus')); });</script>

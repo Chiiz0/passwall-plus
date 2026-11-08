@@ -43,7 +43,9 @@ add rule inet passwall_switch forward counter drop
 add chain inet passwall_switch prerouting { type filter hook prerouting priority -310; policy accept; }
 add rule inet passwall_switch prerouting iifname != "lo" meta l4proto { tcp, udp } th dport 53 counter drop
 add rule inet passwall_switch prerouting udp sport 68 udp dport 67 accept
+add rule inet passwall_switch prerouting udp sport 67 udp dport 68 accept
 add rule inet passwall_switch prerouting udp sport 546 udp dport 547 accept
+add rule inet passwall_switch prerouting udp sport 547 udp dport 546 accept
 add rule inet passwall_switch prerouting icmpv6 type { nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert } accept
 add rule inet passwall_switch prerouting fib daddr type != local counter drop
 add chain inet passwall_switch output { type filter hook output priority -10; policy drop; }
@@ -60,10 +62,15 @@ EOF
 			printf 'add rule inet passwall_switch output meta skuid %s udp dport 123 accept\n' "$ntp_uid"
 			;;
 		esac
+		# DHCP replies can change the request's source/destination tuple (zero
+		# address, broadcast, offered address). conntrack REPLY alone cannot
+		# preserve leases. Keep both client and server traffic alive in recovery.
 		cat <<'EOF'
 add rule inet passwall_switch output udp sport 68 udp dport 67 accept
+add rule inet passwall_switch output udp sport 67 udp dport 68 accept
 add rule inet passwall_switch output udp sport 546 udp dport 547 accept
-add rule inet passwall_switch output icmpv6 type { nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert } accept
+add rule inet passwall_switch output udp sport 547 udp dport 546 accept
+add rule inet passwall_switch output icmpv6 type { nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert } accept
 add rule inet passwall_switch output counter drop
 EOF
 	} | timeout 10 nft -f - || return 1
@@ -102,10 +109,12 @@ EOF
 		esac
 		if [ "$family" = 4 ]; then
 			echo '-A PW_SWITCH_OUT -p udp --sport 68 --dport 67 -j RETURN'
+			echo '-A PW_SWITCH_OUT -p udp --sport 67 --dport 68 -j RETURN'
 		else
 			echo '-A PW_SWITCH_OUT -p udp --sport 546 --dport 547 -j RETURN'
+			echo '-A PW_SWITCH_OUT -p udp --sport 547 --dport 546 -j RETURN'
 			local kind
-			for kind in 133 135 136; do
+			for kind in 133 134 135 136; do
 				printf '%s\n' "-A PW_SWITCH_OUT -p ipv6-icmp --icmpv6-type $kind -j RETURN"
 			done
 		fi
@@ -123,8 +132,10 @@ EOF
 		echo '-A PW_SWITCH_PRE ! -i lo -p tcp --dport 53 -j DROP'
 		if [ "$family" = 4 ]; then
 			echo '-A PW_SWITCH_PRE -p udp --sport 68 --dport 67 -j RETURN'
+			echo '-A PW_SWITCH_PRE -p udp --sport 67 --dport 68 -j RETURN'
 		else
 			echo '-A PW_SWITCH_PRE -p udp --sport 546 --dport 547 -j RETURN'
+			echo '-A PW_SWITCH_PRE -p udp --sport 547 --dport 546 -j RETURN'
 			for kind in 133 134 135 136; do
 				printf '%s\n' "-A PW_SWITCH_PRE -p ipv6-icmp --icmpv6-type $kind -j RETURN"
 			done

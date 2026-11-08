@@ -2207,3 +2207,426 @@ msgstr "正在切换；网络保护中"
 
 msgid "Ready"
 msgstr "已就绪"
+
+msgid "Plus Overview"
+msgstr "总览面板"
+
+msgid "Global egress"
+msgstr "全局出口"
+
+msgid "Device egress"
+msgstr "单设备出口"
+
+msgid "Every device, its own exit."
+msgstr "每台设备，都有自己的出口。"
+
+msgid "Device identity, proxy routing and VPN protection in one place."
+msgstr "设备身份、代理出口与 VPN 保护，在这里一目了然。"
+
+msgid "Add device policy"
+msgstr "新增设备策略"
+
+msgid "Manage OpenVPN"
+msgstr "管理 OpenVPN"
+
+msgid "Device egress map"
+msgstr "设备出口一览"
+
+msgid "Rules run in order. A loaded rule is not a connectivity test."
+msgstr "规则按顺序匹配；已加载规则不代表出口连通性已验证。"
+
+msgid "Manage device policies"
+msgstr "管理设备策略"
+
+msgid "Find a device"
+msgstr "查找设备"
+
+msgid "Name, IP, MAC or exit"
+msgstr "名称、IP、MAC 或出口"
+
+msgid "OpenVPN tunnels"
+msgstr "OpenVPN 隧道"
+
+msgid "Tunnel state uses the process and route. Traffic counters belong to this tunnel session."
+msgstr "根据进程和路由判断隧道状态；收发计数来自本次隧道会话。"
+
+msgid "DHCP device discovery"
+msgstr "发现 DHCP 设备"
+
+msgid "An active lease is a configuration hint, not proof that a device is online."
+msgstr "有效租约可用于填写设备配置，不代表设备当前在线。"
+
+msgid "Bind a device"
+msgstr "绑定设备"
+
+msgid "A VPN exit for your whole network or one device."
+msgstr "全网或单台设备，都能拥有 VPN 出口。"
+
+msgid "Import a profile, choose its devices, and see the tunnel state here."
+msgstr "导入配置、分配设备，在这里查看隧道状态。"
+
+msgid "Add OpenVPN profile"
+msgstr "新增 OpenVPN 配置"
+
+msgid "Import profile"
+msgstr "导入配置"
+
+msgid "Read a local .ovpn file and check authentication, DNS and pre-proxy settings."
+msgstr "读取本地 .ovpn 文件，检查认证、DNS 和前置代理设置。"
+
+msgid "Assign an exit"
+msgstr "分配出口"
+
+msgid "Select it as the global exit or assign it to an IP/MAC-bound device."
+msgstr "将其设为全局出口，或分配给已绑定 IP/MAC 的设备。"
+
+msgid "Verify the tunnel"
+msgstr "确认连接"
+
+msgid "Check the tunnel route and switch health result after applying."
+msgstr "应用后检查隧道路由和切换健康检查结果。"
+
+msgid "Full IPv4 forwarding, with tunnel DNS"
+msgstr "IPv4 全流量转发，DNS 跟随隧道"
+
+msgid "Assigned traffic uses the VPN routing table. A dropped tunnel does not fall back to WAN. Local LAN access follows your policy; IPv6 rejection is configured separately."
+msgstr "所分配的流量使用 VPN 路由表；隧道中断时不会回落到 WAN。局域网访问由策略控制，IPv6 拒绝策略需单独配置。"
+
+msgid "Build a VPN exit"
+msgstr "配置你的 VPN 出口"
+
+msgid "Import the profile, complete authentication, then assign this exit to the global policy or individual devices."
+msgstr "导入配置、补全认证，再将此出口分配给全局策略或单台设备。"
+
+msgid "All OpenVPN profiles"
+msgstr "全部 OpenVPN 配置"
+
+msgid "Import .ovpn file"
+msgstr "导入 .ovpn 文件"
+
+msgid "The file is read locally into this form. Review it, then Save & Apply. Importing does not start a connection."
+msgstr "文件在浏览器中读入表单。确认后点击“保存并应用”，导入本身不会启动连接。"
+
+msgid "View or paste profile text"
+msgstr "查看或粘贴配置文本"
+
+msgid "One device. One clear routing policy."
+msgstr "设备的身份与出口，清清楚楚。"
+
+msgid "Choose the device identity first, then its exit. Save & Apply activates enabled rules."
+msgstr "先确定设备身份，再选择出口；“保存并应用”后启用的规则才会生效。"
+
+msgid "Select a DHCP device"
+msgstr "选择 DHCP 设备"
+
+msgid "Choosing a lease fills the MAC, IPv4 address and hostname and enables binding in this form. Existing DHCP conflicts are checked on save."
+msgstr "选择租约后自动填入 MAC、IPv4 和主机名，并在表单中开启绑定；保存时会检查 DHCP 冲突。"
+
+msgid "Use this device"
+msgstr "使用此设备"
+
+msgid "Give each device its own exit."
+msgstr "为每台设备选择独立出口。"
+
+msgid "Bind the device identity, choose a proxy or OpenVPN exit, and keep policy order explicit."
+msgstr "绑定设备身份，选择代理或 OpenVPN 出口，并明确规则顺序。"
+
+msgid "View device egress map"
+msgstr "查看设备出口一览"
+
+msgid "Rules match from top to bottom; the first matching rule wins. IP/MAC binding creates a permanent DHCP lease. OpenVPN device forwarding requires binding."
+msgstr "规则从上到下匹配，首条命中的规则生效。IP/MAC 绑定会创建静态 DHCP 租约；单设备 OpenVPN 转发需要先完成绑定。"
+
+msgid "Device and exit"
+msgstr "设备与出口"
+
+msgid "Routing details"
+msgstr "路由细节"
+
+msgid "Not started"
+msgstr "未启动"
+
+msgid "Tunnel route established"
+msgstr "隧道路由已建立"
+
+msgid "Connecting / reconnecting"
+msgstr "连接或重连中"
+
+msgid "Tunnel process absent"
+msgstr "隧道进程未运行"
+
+msgid "Device policies are off"
+msgstr "设备策略总开关已关闭"
+
+msgid "Protection / recovery in progress"
+msgstr "切换保护或恢复中"
+
+msgid "Runtime rule loaded"
+msgstr "运行规则已加载"
+
+msgid "No applied runtime record"
+msgstr "暂无已应用记录"
+
+msgid "Last switch verified"
+msgstr "最近一次切换已验证"
+
+msgid "Recovery pending; inspect logs"
+msgstr "等待恢复，请查看日志"
+
+msgid "Switch in progress"
+msgstr "正在切换"
+
+msgid "Assigned to"
+msgstr "分配对象"
+
+msgid "Global exit"
+msgstr "全局出口"
+
+msgid "Tunnel DNS"
+msgstr "隧道 DNS"
+
+msgid "Tunnel interface"
+msgstr "隧道接口"
+
+msgid "Received / sent"
+msgstr "接收 / 发送"
+
+msgid "Edit profile"
+msgstr "编辑配置"
+
+msgid "Assign devices"
+msgstr "分配设备"
+
+msgid "The switch controller is protecting or recovering the network. Check the result and logs before treating an exit as usable."
+msgstr "切换控制器正在保护或恢复网络。请结合结果和日志确认出口是否可用。"
+
+msgid "Switch protection is disabled. Enable it in Global egress to pause traffic during node changes."
+msgstr "切换保护已关闭。在“全局出口”中开启后，节点切换期间会暂停流量。"
+
+msgid "Switch protection verifies the proxy or VPN before resuming traffic. The last result is not a continuous Internet health test."
+msgstr "切换保护会验证代理或 VPN 后再恢复流量。这里显示最近一次结果，不代表持续的互联网连通性检测。"
+
+msgid "IPv6 rejection configured for:"
+msgstr "已配置 IPv6 拒绝区域："
+
+msgid "IPv6 rejection is disabled"
+msgstr "IPv6 拒绝策略已关闭"
+
+msgid "Protection settings"
+msgstr "保护设置"
+
+msgid "All sources"
+msgstr "所有来源"
+
+msgid "Follow global configuration"
+msgstr "跟随全局配置"
+
+msgid "OpenVPN full IPv4 forwarding"
+msgstr "OpenVPN IPv4 全流量转发"
+
+msgid "Device routing policy"
+msgstr "独立设备路由策略"
+
+msgid "IP/MAC binding"
+msgstr "IP/MAC 绑定"
+
+msgid "Source matching"
+msgstr "来源匹配"
+
+msgid "Matching DHCP lease"
+msgstr "DHCP 租约与绑定一致"
+
+msgid "DHCP address differs; renew the lease"
+msgstr "DHCP 地址与绑定不同，请更新租约"
+
+msgid "No current DHCP lease"
+msgstr "暂无有效 DHCP 租约"
+
+msgid "All interfaces"
+msgstr "所有接口"
+
+msgid "Connectivity not measured here"
+msgstr "此处不检测出口连通性"
+
+msgid "No matching devices."
+msgstr "没有匹配的设备。"
+
+msgid "No device policies yet. Add a device, bind its IP/MAC, then choose an exit."
+msgstr "还没有设备策略。新增设备，绑定 IP/MAC，再选择出口。"
+
+msgid "No OpenVPN profiles yet. Import your first profile to get started."
+msgstr "还没有 OpenVPN 配置，先导入一份配置开始使用。"
+
+msgid "OpenVPN is not installed. Install the OpenVPN component first."
+msgstr "尚未安装 OpenVPN，请先安装 OpenVPN 组件。"
+
+msgid "No exit selected"
+msgstr "尚未选择出口"
+
+msgid "Global proxy off"
+msgstr "全局代理已关闭"
+
+msgid "Saved selection; runtime state shown below"
+msgstr "当前保存的出口；运行记录见下方"
+
+msgid "Device policies can run independently"
+msgstr "单设备策略可独立运行"
+
+msgid "Device policies"
+msgstr "设备策略"
+
+msgid "Enabled rules / all rules"
+msgstr "已启用规则 / 全部规则"
+
+msgid "Device policy master switch is off"
+msgstr "设备策略总开关已关闭"
+
+msgid "Established routes / configured profiles"
+msgstr "已建立路由 / 全部配置"
+
+msgid "Device identity"
+msgstr "设备身份绑定"
+
+msgid "Policies with IP/MAC binding"
+msgstr "已配置 IP/MAC 绑定的规则"
+
+msgid "No current DHCP leases. Devices with static addresses can be entered manually."
+msgstr "暂无有效 DHCP 租约，静态地址设备可手动填写。"
+
+msgid "Unnamed device"
+msgstr "未命名设备"
+
+msgid "Updated"
+msgstr "更新时间"
+
+msgid "Refreshes every 10 seconds"
+msgstr "每 10 秒刷新"
+
+msgid "Status refresh failed. Displayed values may be stale; check your connection or sign in again."
+msgstr "状态刷新失败，当前显示的数据可能已过期。请检查连接或重新登录。"
+
+msgid "enabled device rules"
+msgstr "条已启用设备规则"
+
+msgid "This profile requests a username and password. Enter them in the authentication fields below; profile-embedded credentials are not used."
+msgstr "配置要求账号密码，请在下方认证字段中填写；不会使用配置文件内嵌的账号密码。"
+
+msgid "External certificate/key files are referenced. Use a profile with inline certificates, or ensure the referenced files exist on the router."
+msgstr "配置引用了外部证书或密钥。请使用内嵌证书的配置，或确认对应文件已在路由器上。"
+
+msgid "Pre-proxy uses TCP. Confirm that the VPN server supports TCP on this port; a UDP-only endpoint will not work."
+msgstr "前置代理使用 TCP，请确认 VPN 服务端在此端口支持 TCP；仅支持 UDP 的端点无法使用。"
+
+msgid "Server endpoints"
+msgstr "服务器端点"
+
+msgid "Profile transport"
+msgstr "配置传输协议"
+
+msgid "Inline certificate blocks"
+msgstr "内嵌材料块"
+
+msgid "Profile structure detected. Authentication and connectivity are verified only when the tunnel starts."
+msgstr "已识别配置结构，实际认证和连通性需要启动隧道后验证。"
+
+msgid "Imported into the form; not applied yet."
+msgstr "已读入表单，尚未应用。"
+
+msgid "Import failed; the previous profile was kept."
+msgstr "导入失败，已保留原有配置。"
+
+msgid "Policy preview"
+msgstr "策略预览"
+
+msgid "Choose a device identity"
+msgstr "请先填写设备身份"
+
+msgid "This rule will be enabled after Save & Apply."
+msgstr "此规则将在“保存并应用”后启用。"
+
+msgid "This rule is disabled. Enable it when the configuration is ready."
+msgstr "此规则尚未启用，配置完成后请开启。"
+
+msgid "The device policy master switch is off. Enabled rules with binding turn it on when saved; otherwise enable it on the device policies page."
+msgstr "设备策略总开关已关闭。保存已启用且开启绑定的规则时会自动开启；未使用绑定时，请在设备策略页手动开启。"
+
+msgid "OpenVPN forwards all IPv4 traffic and port 53 DNS through the tunnel."
+msgstr "OpenVPN 通过隧道转发全部 IPv4 流量及 53 端口 DNS。"
+
+msgid "Local LAN access is allowed."
+msgstr "允许访问本地局域网。"
+
+msgid "Local LAN access is isolated except DHCP."
+msgstr "隔离本地局域网访问，仅保留 DHCP。"
+
+msgid "Device details filled. Review the exit and enable the rule before applying."
+msgstr "已填入设备信息。请检查出口并启用规则，再应用配置。"
+
+msgid "Choose a device…"
+msgstr "请选择设备…"
+
+msgid "Leases do not prove a device is online. You can also enter a static address below."
+msgstr "租约不代表设备当前在线，也可以在下方手动填写静态地址。"
+
+msgid "No current DHCP leases. Enter the device MAC and IPv4 address below."
+msgstr "暂无有效 DHCP 租约，请在下方填写设备 MAC 和 IPv4 地址。"
+
+msgid "Device discovery unavailable"
+msgstr "暂时无法发现设备"
+
+msgid "Could not load leases. Enter the device details manually or reload this page."
+msgstr "租约加载失败，可手动填写设备信息或刷新页面。"
+
+msgid "This firmware requires an IPv4 address or hostname in a remote directive."
+msgstr "此固件需要 remote 指令使用 IPv4 地址或主机名。"
+
+msgid "Firewall setup reported an error"
+msgstr "防火墙配置报告错误"
+
+msgid "Last startup completed"
+msgstr "最近一次启动已完成"
+
+msgid "No completed startup record"
+msgstr "暂无启动完成记录"
+
+msgid "Global runtime"
+msgstr "全局运行记录"
+
+msgid "Firewall readiness recorded"
+msgstr "已记录防火墙就绪"
+
+msgid "No firewall readiness record"
+msgstr "暂无防火墙就绪记录"
+
+msgid "Runtime exit record"
+msgstr "运行时出口记录"
+
+msgid "Saved selection and runtime records can differ until changes are applied."
+msgstr "保存的选择与运行记录可能不同，请应用配置后确认。"
+
+msgid "Refresh"
+msgstr "刷新"
+
+msgid "Configure"
+msgstr "配置"
+
+msgid "Unknown"
+msgstr "未知"
+
+msgid "Disabled"
+msgstr "已停用"
+
+msgid "Collecting data..."
+msgstr "正在获取数据…"
+
+msgid "Assign to a new device"
+msgstr "分配给新设备"
+
+msgid "One default exit. Device policies stay in control."
+msgstr "统一默认出口，保留每台设备的选择。"
+
+msgid "Choose the default proxy or OpenVPN exit here. Individual device rules take priority over the global policy."
+msgstr "在这里选择默认代理或 OpenVPN 出口，单设备规则优先于全局策略。"
+
+msgid "Switch protection preserves DHCP address assignment. While DNS is paused, open LuCI using the router LAN IP."
+msgstr "切换保护保留 DHCP 地址分配。DNS 暂停期间，请使用路由器的 LAN IP 地址访问管理页面。"

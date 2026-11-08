@@ -1,0 +1,16 @@
+<%+header%>
+<% local api = require "luci.passwall.api" %>
+<link rel="stylesheet" href="<%=resource%>/view/passwall/plus.css" />
+<div id="pw-plus" class="pw-plus" data-base="<%=api.url()%>" data-mode="openvpn" data-token="<%=token%>">
+	<div class="pw-hero"><div><p class="pw-eyebrow">PASSWALL PLUS / OPENVPN</p><h2><%:A VPN exit for your whole network or one device.%></h2><p><%:Import a profile, choose its devices, and see the tunnel state here.%></p></div>
+		<form method="post" action="<%=api.url('plus_create')%>"><input type="hidden" name="token" value="<%=token%>" /><input type="hidden" name="kind" value="openvpn" /><button id="pw-add-vpn" class="cbi-button cbi-button-action" type="submit"><%:Add OpenVPN profile%></button></form>
+	</div>
+	<div class="pw-steps"><div><b>01 · <%:Import profile%></b><p><%:Read a local .ovpn file and check authentication, DNS and pre-proxy settings.%></p></div><div><b>02 · <%:Assign an exit%></b><p><%:Select it as the global exit or assign it to an IP/MAC-bound device.%></p></div><div><b>03 · <%:Verify the tunnel%></b><p><%:Check the tunnel route and switch health result after applying.%></p></div></div>
+	<div class="pw-refresh"><span id="pw-updated" role="status"><%:Collecting data...%></span><button id="pw-refresh" type="button" class="cbi-button"><%:Refresh%></button></div>
+	<div id="pw-error" class="pw-notice pw-warning" role="alert" hidden></div>
+	<div id="pw-protection"></div>
+	<div id="pw-vpns" class="pw-vpn-grid"></div>
+	<div class="pw-notice"><strong><%:Full IPv4 forwarding, with tunnel DNS%></strong><p><%:Assigned traffic uses the VPN routing table. A dropped tunnel does not fall back to WAN. Local LAN access follows your policy; IPv6 rejection is configured separately.%></p><div class="pw-actions"><a href="<%=api.url('settings')%>"><%:Global egress%> →</a><a href="<%=api.url('acl')%>"><%:Device egress%> →</a><a href="<%=api.url('log')%>"><%:Runtime Logs%> →</a></div></div>
+</div>
+<script>L.require('view.passwall.plus').then(function(ui) { ui.dashboard(document.getElementById('pw-plus')); });</script>
+<%+footer%>

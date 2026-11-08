@@ -1,0 +1,24 @@
+<%+header%>
+<% local api = require "luci.passwall.api" %>
+<link rel="stylesheet" href="<%=resource%>/view/passwall/plus.css" />
+<div id="pw-plus" class="pw-plus" data-base="<%=api.url()%>" data-mode="overview" data-token="<%=token%>">
+	<div class="pw-hero">
+		<div><p class="pw-eyebrow">PASSWALL PLUS / EzWrt</p><h2><%:Every device, its own exit.%></h2><p><%:Device identity, proxy routing and VPN protection in one place.%></p></div>
+		<div class="pw-actions">
+			<form method="post" action="<%=api.url('plus_create')%>"><input type="hidden" name="token" value="<%=token%>" /><input type="hidden" name="kind" value="device" /><button class="cbi-button cbi-button-action" type="submit"><%:Add device policy%></button></form>
+			<a class="cbi-button" href="<%=api.url('openvpn')%>"><%:Manage OpenVPN%></a>
+		</div>
+	</div>
+	<div class="pw-refresh"><span id="pw-updated" role="status"><%:Collecting data...%></span><button id="pw-refresh" type="button" class="cbi-button"><%:Refresh%></button></div>
+	<div id="pw-error" class="pw-notice pw-warning" role="alert" hidden></div>
+	<div id="pw-summary" class="pw-metrics"></div>
+	<div id="pw-protection"></div>
+	<div id="pw-runtime"></div>
+	<section class="pw-panel"><div class="pw-section-head"><div><h3><%:Device egress map%></h3><p><%:Rules run in order. A loaded rule is not a connectivity test.%></p></div><a href="<%=api.url('acl')%>"><%:Manage device policies%> →</a></div>
+		<label class="pw-search"><span><%:Find a device%></span><input id="pw-device-search" type="search" placeholder="<%:Name, IP, MAC or exit%>" /></label><div id="pw-devices"></div>
+	</section>
+	<section class="pw-panel"><div class="pw-section-head"><div><h3><%:OpenVPN tunnels%></h3><p><%:Tunnel state uses the process and route. Traffic counters belong to this tunnel session.%></p></div><a href="<%=api.url('openvpn')%>"><%:Manage OpenVPN%> →</a></div><div id="pw-vpns" class="pw-vpn-grid"></div></section>
+	<section class="pw-panel"><div class="pw-section-head"><div><h3><%:DHCP device discovery%></h3><p><%:An active lease is a configuration hint, not proof that a device is online.%></p></div><a href="<%=api.url('acl')%>"><%:Bind a device%> →</a></div><div id="pw-leases"></div></section>
+</div>
+<script>L.require('view.passwall.plus').then(function(ui) { ui.dashboard(document.getElementById('pw-plus')); });</script>
+<%+footer%>

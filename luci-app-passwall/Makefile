@@ -8,8 +8,11 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-passwall
 PKG_VERSION:=26.10.29
-PKG_RELEASE:=3
-PKG_PO_VERSION:=$(PKG_VERSION)
+PKG_RELEASE:=4
+PKG_PO_VERSION:=$(PKG_VERSION)-r$(PKG_RELEASE)
+
+# The Plus UI uses CSS variables and grid; preserve them without legacy CSSTidy.
+CONFIG_LUCI_CSSTIDY:=
 
 PKG_CONFIG_DEPENDS:= \
 	CONFIG_PACKAGE_$(PKG_NAME)_Iptables_Transparent_Proxy \

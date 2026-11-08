@@ -1,0 +1,8 @@
+<% local api = self.map.api %>
+<link rel="stylesheet" href="<%=resource%>/view/passwall/plus.css" />
+<div id="pw-device-editor" class="pw-plus pw-editor" data-base="<%=api.url()%>" data-section="<%=self.sid%>" data-config="<%=self.map.config%>">
+	<div class="pw-hero"><div><p class="pw-eyebrow">PASSWALL PLUS / DEVICE EGRESS</p><h2><%:One device. One clear routing policy.%></h2><p><%:Choose the device identity first, then its exit. Save & Apply activates enabled rules.%></p></div><a class="cbi-button" href="<%=api.url('overview')%>"><%:Plus Overview%></a></div>
+	<div class="pw-panel"><h3><%:Select a DHCP device%></h3><p class="pw-muted"><%:Choosing a lease fills the MAC, IPv4 address and hostname and enables binding in this form. Existing DHCP conflicts are checked on save.%></p><div class="pw-editor-control"><select id="pw-lease-select" aria-label="<%:Select a DHCP device%>" disabled><option><%:Collecting data...%></option></select><button id="pw-use-lease" type="button" class="cbi-button" disabled><%:Use this device%></button></div><p id="pw-lease-message" class="pw-muted" role="status"></p></div>
+	<div id="pw-policy-preview" class="pw-notice" aria-live="polite"></div>
+</div>
+<script>L.require('view.passwall.plus-editor').then(function(ui) { ui.device(document.getElementById('pw-device-editor')); });</script>

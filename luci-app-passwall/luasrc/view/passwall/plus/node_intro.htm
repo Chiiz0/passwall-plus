@@ -1,0 +1,4 @@
+<% local api = self.map.api %>
+<link rel="stylesheet" href="<%=resource%>/view/passwall/plus.css" />
+<div class="pw-plus pw-editor"><div class="pw-hero"><div><p class="pw-eyebrow">PASSWALL PLUS / OPENVPN</p><h2><%:Build a VPN exit%></h2><p><%:Import the profile, complete authentication, then assign this exit to the global policy or individual devices.%></p></div><a class="cbi-button" href="<%=api.url('openvpn')%>"><%:All OpenVPN profiles%></a></div></div>
+<script>L.require('view.passwall.plus-editor').then(function(ui) { ui.profiles(); });</script>

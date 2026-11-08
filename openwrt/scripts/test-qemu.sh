@@ -207,8 +207,10 @@ set +x
 session=$(ubus call session login '{"username":"root","password":""}' | jsonfilter -e '@.ubus_rpc_session')
 test -n "$session"
 ubus call session set "{\"ubus_rpc_session\":\"$session\",\"values\":{\"token\":\"qemu-test-only\"}}" >/dev/null
-for page in settings node_config/qemu_vpn acl_config/qemu_device; do
+for page in overview openvpn settings node_config/qemu_vpn acl_config/qemu_device; do
 	case "$page" in
+		overview) control=pw-devices ;;
+		openvpn) control=pw-add-vpn ;;
 		settings) control=openvpn_global_allow_lan ;;
 		node_config/*) control=openvpn_config ;;
 		acl_config/*) control=bind_enable ;;
@@ -224,6 +226,17 @@ for page in settings node_config/qemu_vpn acl_config/qemu_device; do
 	! grep -q 'media_error' /tmp/passwall-qemu-form.html
 	printf 'LuCI form passed: %s\n' "$page"
 done
+status=$(curl --max-time 15 --silent --show-error --output /tmp/passwall-plus-status.json --write-out '%{http_code}' \
+	--cookie "sysauth_http=$session" 'http://127.0.0.1/cgi-bin/luci/admin/services/passwall/plus_status')
+test "$status" = 200
+lua -e 'local d=require("luci.jsonc").parse(require("nixio.fs").readfile("/tmp/passwall-plus-status.json")); assert(d.global and d.guard and d.vpns); for _,n in ipairs(d.nodes) do assert(not n.config and not n.password and not n.username) end'
+status=$(curl --max-time 15 --silent --output /dev/null --write-out '%{http_code}' \
+	--cookie "sysauth_http=$session" 'http://127.0.0.1/cgi-bin/luci/admin/services/passwall/plus_create?kind=device')
+test "$status" = 405
+status=$(curl --max-time 15 --silent --output /dev/null --write-out '%{http_code}' \
+	--cookie "sysauth_http=$session" --data 'kind=device&token=invalid' \
+	'http://127.0.0.1/cgi-bin/luci/admin/services/passwall/plus_create')
+test "$status" = 403
 status=$(curl --max-time 45 --silent --show-error --location \
 	--output /tmp/passwall-ezcnet-qemu-form.html --write-out '%{http_code}' \
 	--cookie "sysauth_http=$session" \
@@ -235,6 +248,12 @@ for resource in ezwrt/cascade.css ezwrt/logo.svg resources/menu-ezwrt.js; do
 	status=$(curl --max-time 10 --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1/luci-static/$resource")
 	test "$status" = 200
 done
+# Even a valid CSRF token must not grant configuration writes to a read-only session.
+ubus call session revoke "{\"ubus_rpc_session\":\"$session\",\"scope\":\"uci\",\"objects\":[[\"*\",\"*\"],[\"passwall\",\"write\"],[\"*\",\"write\"]]}" >/dev/null
+status=$(curl --max-time 15 --silent --output /dev/null --write-out '%{http_code}' \
+	--cookie "sysauth_http=$session" --data 'kind=device&token=qemu-test-only' \
+	'http://127.0.0.1/cgi-bin/luci/admin/services/passwall/plus_create')
+test "$status" = 403
 ubus call session destroy "{\"ubus_rpc_session\":\"$session\"}" >/dev/null
 unset session
 set -x
@@ -302,4 +321,5 @@ EOF
 # Reference migration tests use an isolated UCI directory in the disposable VM.
 ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua < "${OPENWRT_DIR}/tests/test-ezcnet-catalog.lua"
 python3 "${OPENWRT_DIR}/tests/test-switch-guard.py" "${SSH_PORT}" "${PROBE_PORT}"
+python3 "${OPENWRT_DIR}/tests/test-management-access.py" "${SSH_PORT}" "${PROBE_PORT}" "${COMPRESSED_IMAGE}"
 python3 "${OPENWRT_DIR}/tests/test-openvpn-health.py" "${SSH_PORT}" "${COMPRESSED_IMAGE}"
