@@ -2157,7 +2157,7 @@ if library_mode then
 				if line:match("%S") then
 					index = index + 1
 					if index > 2000 then error("too_many_nodes") end
-					local kind, content = api.trim(line):match("^([%w%-]+)://(.+)$")
+					local kind, content = api.trim(line):match("^([%a][%w+%.%-]*)://(.+)$")
 					local parsed, node = pcall(function()
 						if not kind then return nil end
 						if kind == "vmess" or kind == "ssr" then content = base64Decode(content:gsub("#.*$", "")) end

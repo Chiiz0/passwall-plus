@@ -74,6 +74,8 @@ fw4 reload and partial protection failures. Local SOCKS/TLS fixtures exercise
 verified startup, unreachable-node rollback, delayed listeners, controller death,
 new-request cancellation, failed binary replacement, orphan cleanup, runtime
 core death and recovery after an unavailable upstream returns.
+Installed-parser tests cover subscription URI passwords, explicit/default ports,
+IPv6 hosts, Naive scheme names, and the cloud converter's read-only/error contract.
 An independent LAN client also requests new unicast/broadcast DHCP leases,
 renews an existing lease, and loads LuCI by LAN IP during protection, an
 unreachable-node health check, sustained recovery, and verified restoration.
