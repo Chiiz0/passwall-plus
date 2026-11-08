@@ -78,11 +78,12 @@ cp /etc/ssl/certs/ca-certificates.crt /tmp/management-original-ca
 /etc/init.d/passwall stop
 /etc/init.d/passwall-guard stop
 rm -rf /etc/passwall/.switch
-# QEMU's separate SSH management NIC also has a built-in DHCP server. Its
-# replies must not enter the test link and mask a broken router DHCP service.
+# QEMU's SSH management and spare LAN NICs have built-in DHCP servers.
+# Block all forwarded DHCP replies so only the router's locally generated
+# replies can reach the test client and satisfy this regression.
 nft add table bridge management_test
 nft 'add chain bridge management_test forward { type filter hook forward priority -300; policy accept; }'
-nft add rule bridge management_test forward ether type ip ip saddr 10.0.0.2 ip protocol udp udp sport 67 udp dport 68 drop
+nft add rule bridge management_test forward ether type ip ip protocol udp udp sport 67 udp dport 68 drop
 uci set dhcp.lan.force=1
 uci commit dhcp
 /etc/init.d/dnsmasq restart
