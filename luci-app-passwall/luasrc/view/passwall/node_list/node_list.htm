@@ -1,3 +1,4 @@
+<%+passwall/request%>
 <%
 local map = self.map
 local api = map.api
@@ -626,16 +627,16 @@ table td, .table .td {
 				const master = document.getElementById("node_list");
 				const dom = master.getElementsByClassName("cbi-tab")[0];
 				const current_group = dom ? (dom.getAttribute("group_name") || "default") : "default";
-				window.location.href='<%=api.url("add_node")%>?redirect=1&group=' + current_group;
+				PasswallRequest.navigate('<%=api.url("add_node")%>', {redirect: 1, group: current_group});
 				break;
 			case "copy":
-				window.location.href = '<%=api.url("copy_node")%>' + "?section=" + cbi_id;
+				PasswallRequest.navigate('<%=api.url("copy_node")%>', {section: cbi_id});
 				break;
 			case "edit":
 				window.location.href='<%=api.url("node_config")%>/' + cbi_id;
 				break;
 			case "del":
-				window.location.href = '<%=api.url("delete_select_nodes")%>' + "?redirect=1&ids=" + cbi_id;
+				PasswallRequest.navigate('<%=api.url("delete_select_nodes")%>', {redirect: 1, ids: cbi_id});
 				break;
 			case "row_top":
 				let btn = a.btn;
@@ -651,7 +652,7 @@ table td, .table .td {
 				break;
 			case "del_all":
 				if (confirm('<%:Are you sure to clear all nodes?%>') == true){
-					XHR.get('<%=api.url("clear_all_nodes")%>', null,
+					PasswallRequest.post('<%=api.url("clear_all_nodes")%>', null,
 					function(x, data) {
 						if(x && x.status == 200) {
 							window.location.href = '<%=api.url("node_list")%>';
@@ -754,7 +755,7 @@ table td, .table .td {
 					dom.style.display = 'block';
 					dom.innerHTML = '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;"><%:Processing, please wait…%></div>';
 					ajax.abortAll();
-					XHR.get('<%=api.url("delete_select_nodes")%>', {
+					PasswallRequest.post('<%=api.url("delete_select_nodes")%>', {
 						ids: ids.join()
 					},
 					function(x, data) {
@@ -1261,32 +1262,56 @@ table td, .table .td {
 			dom.innerHTML = '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;"><%:Processing, please wait…%></div>';
 
 			const chunkSize = 1000;  // Fragmented sending to overcome uhttpd's limitations, with each fragment containing 1000 characters.
-			const totalChunks = Math.ceil(link.length / chunkSize);
+			if (new TextEncoder().encode(link).length > 262144) {
+				dom.innerHTML = ''; dom.style.display = 'none';
+				alert("<%:Import is limited to 256 KiB.%>"); return;
+			}
+			const characters = Array.from(link);
+			const totalChunks = Math.ceil(characters.length / chunkSize);
+			let uploadId = '';
 			let currentChunk = 0;
+			function failed(xhr) {
+				dom.innerHTML = ''; dom.style.display = 'none';
+				let response;
+				try { response = JSON.parse(xhr.responseText); } catch (_) {}
+				const messages = {
+					invalid_link_input: "<%:Import rejected. Check all links; no nodes were added.%>",
+					config_conflict: "<%:Configuration changed during upload. Reload the page and upload again.%>",
+					config_busy: "<%:Configuration is being updated. Please try again shortly.%>",
+					input_too_large: "<%:Import is limited to 256 KiB.%>"
+				};
+				alert(xhr.status === 403 ? "<%:Permission denied or session expired. Please sign in again.%>" :
+					(messages[response && response.message] || "<%:Import failed. Reload the page and try again.%>"));
+			}
 
 			function sendNextChunk() {
 				if (currentChunk < totalChunks) {
-					const chunk = link.substring(currentChunk * chunkSize, (currentChunk + 1) * chunkSize);
+					const chunk = characters.slice(currentChunk * chunkSize, (currentChunk + 1) * chunkSize).join('');
 					const xhr = new XMLHttpRequest();
 					xhr.open('POST', '<%=api.url("link_add_node")%>', true);
+					xhr.timeout = 45000;
 					xhr.onload = function () {
 						if (xhr.status === 200) {
+							let response;
+							try { response = JSON.parse(xhr.responseText); } catch (_) {}
+							if (!response || response.status !== 'success' || !response.upload_id) {
+								xhr.onerror(); return;
+							}
+							uploadId = response.upload_id;
 							currentChunk++;
 							sendNextChunk();
 						} else {
-							dom.innerHTML = '';
-							dom.style.display = 'none';
-							alert("<%:Error%>");
+							failed(xhr);
 							return;
 						}
 					};
-					xhr.onerror = function () {
-						dom.innerHTML = '';
-						dom.style.display = 'none';
-						alert("<%:Network Error%>");
+					xhr.onerror = xhr.ontimeout = function () {
+						failed(xhr);
 						return;
 					};
 					const formData = new FormData();
+					formData.append("token", PasswallRequest.token);
+					formData.append("upload_id", uploadId);
 					formData.append("chunk", chunk);
 					formData.append("chunk_index", currentChunk);
 					formData.append("total_chunks", totalChunks);
@@ -1345,7 +1370,7 @@ table td, .table .td {
 				}
 				if (ids.length > 0) {
 					ajax.abortAll();
-					XHR.get('<%=api.url("reassign_group")%>', {
+					PasswallRequest.post('<%=api.url("reassign_group")%>', {
 						group: group,
 						ids: ids.join(",")
 					},
@@ -1382,7 +1407,7 @@ table td, .table .td {
 		set(type, config) {
 			if (confirm('<%:Are you sure set this node?%>') == true){
 				ajax.abortAll();
-				window.location.href = '<%=api.url("set_node")%>?type=' + type + '&config=' + config + '&section=' + this.section;
+				PasswallRequest.navigate('<%=api.url("set_node")%>', {type: type, config: config, section: this.section});
 			}
 		}
 	}
@@ -1705,7 +1730,7 @@ table td, .table .td {
 		// Save node list options when they change.
 		function onChange(option, value, refresh) {
 			ajax.abortAll();
-			XHR.get('<%=api.url("save_node_list_opt")%>', {
+			PasswallRequest.post('<%=api.url("save_node_list_opt")%>', {
 				option: option,
 				value: value
 			}, function(x) {

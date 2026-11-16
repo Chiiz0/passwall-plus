@@ -1434,7 +1434,7 @@ start_dns() {
 		uci -q delete dhcp.@dnsmasq[0].min_cache_ttl
 		uci -q add_list dhcp.@dnsmasq[0].addnmount=${GLOBAL_DNSMASQ_CONF_PATH}
 		uci -q commit dhcp
-		lua $APP_PATH/helper_dnsmasq.lua logic_restart -LOG 1
+		lua $APP_PATH/helper_dnsmasq.lua logic_restart -LOG 1 || return 1
 	elif [ "${DNS_SHUNT}" = "smartdns" ]; then
 		# SmartDNS reads DHCP leases itself; no forwarding dnsmasq instance is needed.
 		DNS_REDIRECT_PORT=${smartdns_listen_port}
@@ -1886,8 +1886,7 @@ start() {
 	[ "$GLOBAL_OPENVPN" = "1" ] && start_global_openvpn
 	if [ "$ENABLED_DEFAULT_ACL" = 1 ] || [ "$ENABLED_ACLS" = 1 ]; then
 		[ "$(uci -q get dhcp.@dnsmasq[0].dns_redirect)" = "1" ] && {
-			uci -q set ${CONFIG}.@global[0].dnsmasq_dns_redirect='1'
-			uci -q commit ${CONFIG}
+			lua /usr/libexec/passwall-config-marker set || return 1
 			uci -q set dhcp.@dnsmasq[0].dns_redirect='0'
 			uci -q commit dhcp
 			lua $APP_PATH/helper_dnsmasq.lua restart -LOG 0
@@ -1973,8 +1972,7 @@ stop() {
 		[ -n "${bak_dnsmasq_dns_redirect}" ] && {
 			uci -q set dhcp.@dnsmasq[0].dns_redirect="${bak_dnsmasq_dns_redirect}"
 			uci -q commit dhcp
-			uci -q delete ${CONFIG}.@global[0].dnsmasq_dns_redirect
-			uci -q commit ${CONFIG}
+			lua /usr/libexec/passwall-config-marker delete || return 1
 		}
 		if [ -z "${ACL_default_dns_port}" ] || [ -n "${bak_dnsmasq_dns_redirect}" ]; then
 			uci -q del_list dhcp.@dnsmasq[0].addnmount="${GLOBAL_DNSMASQ_CONF_PATH}"

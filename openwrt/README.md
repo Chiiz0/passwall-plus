@@ -74,6 +74,10 @@ fw4 reload and partial protection failures. Local SOCKS/TLS fixtures exercise
 verified startup, unreachable-node rollback, delayed listeners, controller death,
 new-request cancellation, failed binary replacement, orphan cleanup, runtime
 core death and recovery after an unavailable upstream returns.
+The installed configuration tests also cover shared POSIX locks, stale LuCI
+forms, CSRF and read-only permissions, backup roundtrips, rejected UCI input,
+partial-write rollback, interrupted-restore recovery, and cloud rollback after
+runtime normalization while preserving later local changes.
 Installed-parser tests cover subscription URI passwords, explicit/default ports,
 IPv6 hosts, Naive scheme names, and the cloud converter's read-only/error contract.
 An independent LAN client also requests new unicast/broadcast DHCP leases,
@@ -97,10 +101,21 @@ python3 openwrt/tests/test-switch-lifecycle.py
 
 ## GitHub releases
 
+`build-firmware.yml` is the sole publishing workflow. The old rolling-SDK
+publisher has been removed; legacy IPK builds remain manual. PRs and main pushes
+run `bash openwrt/scripts/check.sh`, also required by firmware builds.
+
 The workflow always stores a 14-day GitHub Actions artifact. A tag matching
 `firmware-v*` also creates a permanent GitHub Release after the firmware passes
 the QEMU boot test, and uploads all images, manifests, build metadata, and
-`SHA256SUMS`. For example:
+`SHA256SUMS`. A `release-manifest.json` records component versions, compatibility,
+source commit, dirty-source status, pinned inputs and artifact hashes. Publishing
+verifies the original build manifest and the exact checksum inventory before
+creating a draft. It downloads the draft and repeats verification before making
+it public and latest. Empty required packages, missing or extra assets, duplicate
+checksum entries, symlinks and content changes fail validation. The publisher
+does not regenerate build provenance. Existing releases are never silently
+overwritten. For example:
 
 ```sh
 git tag -a firmware-v25.12.6-r3 -m "PassWall Plus OpenWrt 25.12.6 r3"

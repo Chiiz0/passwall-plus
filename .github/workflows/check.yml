@@ -1,0 +1,22 @@
+name: Check PassWall Plus
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install test dependencies
+        run: sudo apt-get update && sudo apt-get install -y lua5.1 nodejs
+      - name: Run local regression checks
+        run: bash openwrt/scripts/check.sh

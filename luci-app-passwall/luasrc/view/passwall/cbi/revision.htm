@@ -1,0 +1,4 @@
+<input type="hidden" name="passwall_revision_<%=self.map.config%>" value="<%=self.map.config_revision%>" />
+<% if self.map.passwall_conflict then %>
+<div class="alert-message warning"><%=pcdata(self.map.errmessage)%></div>
+<% end %>

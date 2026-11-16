@@ -246,6 +246,7 @@ switch_restore_config() {
 		local nixio = require "nixio"
 		local file = nixio.open(os.getenv("PASSWALL_UPDATE_LOCK"), "a")
 		if not file or not file:lock("tlock") then os.exit(1) end
+		if not pcall(function() require("luci.passwall.backup_runtime").recover() end) then os.exit(1) end
 		local status = os.execute("/usr/libexec/passwall-guard-restore")
 		os.exit(status == 0 and 0 or 1)
 	' 9>&-

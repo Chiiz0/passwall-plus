@@ -534,8 +534,8 @@ o = s:taboption("DNS", DummyValue, "clear_ipset", set_title, translate("Try this
 o.rawhtml = true
 function o.cfgvalue(self, section)
 	return string.format(
-		[[<button type="button" class="cbi-button cbi-button-remove" onclick="location.href='%s'">%s</button>]],
-		api.url("flush_set") .. "?redirect=1&reload=1", set_title)
+		[[<button type="button" class="cbi-button cbi-button-remove" onclick="PasswallRequest.navigate('%s', {redirect: 1, reload: 1})">%s</button>]],
+		api.url("flush_set"), set_title)
 end
 
 s:tab("Proxy", translate("Mode"))

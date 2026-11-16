@@ -1858,8 +1858,7 @@ stop() {
 	[ -z "$(command -v echolog)" ] && . "$UTILS_PATH"
 	del_firewall_rule
 	[ $(config_n_get @global[0] flush_set_on_reboot "0") = "1" ] || [ $(config_n_get @global[0] flush_set "0") = "1" ] && {
-		uci -q delete ${CONFIG}.@global[0].flush_set
-		uci -q commit ${CONFIG}
+		lua /usr/libexec/passwall-config-marker flush || return 1
 		#flush_table
 		flush_nftset
 		rm -rf $TMP_PATH2/singbox*

@@ -20,7 +20,7 @@ local map = self.map
 	});
 </script>
 
-<% if luci.http.formvalue("cbi.apply") == "1" and map.is_js_luci then -%>
+<% if luci.http.formvalue("cbi.apply") == "1" and map.is_js_luci and not map.passwall_conflict then -%>
 <script type="text/javascript">
 	document.addEventListener("luci-loaded", function() {
 		//L.env.apply_display = 2; //Write whatever you want, it's all just a fake progress bar anyway.

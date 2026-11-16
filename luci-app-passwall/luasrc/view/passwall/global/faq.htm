@@ -1,3 +1,4 @@
+<%+passwall/request%>
 <%
 local map = self.map
 local api = map.api
@@ -53,7 +54,7 @@ local api = map.api
 
 	function hide(url) {
 		if (confirm('<%:Are you sure to hide?%>') == true) {
-			window.location.href = hide_url;
+			PasswallRequest.navigate(hide_url);
 		}
 	}
 

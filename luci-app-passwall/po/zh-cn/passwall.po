@@ -1815,8 +1815,8 @@ msgstr "备份还原"
 msgid "Backup or Restore Client and Server Configurations."
 msgstr "备份或还原客户端及服务端配置。"
 
-msgid "Note: Restoring configurations across different versions may cause compatibility issues."
-msgstr "注意：不同版本间的配置恢复可能会导致兼容性问题。"
+msgid "Note: Only backups from the same application version can be restored. Package revisions may differ."
+msgstr "注意：仅可恢复相同应用版本的备份，允许包修订号不同。"
 
 msgid "Create Backup File"
 msgstr "创建备份文件"
@@ -2630,3 +2630,42 @@ msgstr "在这里选择默认代理或 OpenVPN 出口，单设备规则优先于
 
 msgid "Switch protection preserves DHCP address assignment. While DNS is paused, open LuCI using the router LAN IP."
 msgstr "切换保护保留 DHCP 地址分配。DNS 暂停期间，请使用路由器的 LAN IP 地址访问管理页面。"
+
+msgid "Permission denied or session expired. Please sign in again."
+msgstr "权限不足或登录已过期，请重新登录。"
+
+msgid "Configuration is being updated. Please try again shortly."
+msgstr "配置正在更新，请稍后重试。"
+
+msgid "Configuration changed during upload. Reload the page and upload again."
+msgstr "上传期间配置已变化，请刷新页面后重新上传。"
+
+msgid "This backup is incompatible. Use a backup from the same application version."
+msgstr "备份不兼容，请使用相同应用版本生成的备份。"
+
+msgid "The backup exceeds the size limit."
+msgstr "备份文件超过大小限制。"
+
+msgid "Restore failed. The previous files have been recovered."
+msgstr "恢复失败，已恢复原有文件。"
+
+msgid "An interrupted restore needs recovery. Check the system log before retrying."
+msgstr "上次恢复中断，请检查系统日志并处理后重试。"
+
+msgid "Operation failed. Check the backup file and try again."
+msgstr "操作失败，请检查备份文件后重试。"
+
+msgid "Import is limited to 256 KiB."
+msgstr "导入内容不能超过 256 KiB。"
+
+msgid "Import rejected. Check all links; no nodes were added."
+msgstr "导入被拒绝，请检查所有链接；本次未添加节点。"
+
+msgid "Import failed. Reload the page and try again."
+msgstr "导入失败，请刷新页面后重试。"
+
+msgid "Invalid file size."
+msgstr "文件大小无效。"
+
+msgid "Operation failed. Reload the page and try again."
+msgstr "操作失败，请刷新页面后重试。"

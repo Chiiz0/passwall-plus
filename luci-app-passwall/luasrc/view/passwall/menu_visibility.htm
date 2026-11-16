@@ -1,0 +1,8 @@
+<%+header%>
+<%+passwall/request%>
+<div class="cbi-map">
+	<h2>PassWall Plus</h2>
+	<p><% if show_menu then %><%:Show in main menu:%><% else %><%:Hide in main menu:%><% end %></p>
+	<button class="cbi-button cbi-button-apply" type="button" onclick="PasswallRequest.navigate(window.location.href)"><%:Apply%></button>
+</div>
+<%+footer%>

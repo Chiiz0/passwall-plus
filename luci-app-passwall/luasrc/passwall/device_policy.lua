@@ -228,8 +228,8 @@ local function managed_section(cursor, acl_id)
 	return section
 end
 
-function sync_dhcp()
-	local cursor = require "luci.model.uci".cursor()
+local function sync_dhcp_locked()
+	local cursor = require "uci".cursor()
 	local bindings, errors = get_bindings(cursor, false)
 	local changed_passwall, changed_dhcp = false, false
 	local desired, user_hosts = {}, {}
@@ -300,14 +300,21 @@ function sync_dhcp()
 	end
 
 	if changed_passwall then
-		cursor:save(api.c_config)
-		cursor:commit(api.c_config)
+		require("luci.passwall.config_transaction").commit(cursor, api.c_config)
 	end
 	if changed_dhcp then
 		cursor:save("dhcp")
 		cursor:commit("dhcp")
-		api.sys.call("/etc/init.d/dnsmasq reload >/dev/null 2>&1")
+		require("luci.passwall.config_transaction").after(function()
+			api.sys.call("/etc/init.d/dnsmasq reload >/dev/null 2>&1")
+		end)
 	end
 	for _, message in ipairs(errors) do api.log("Device policy:", message) end
 	return #errors == 0, errors
+end
+
+function sync_dhcp()
+	local ok, result, errors = require("luci.passwall.config_transaction").run(sync_dhcp_locked)
+	if not ok then return false, {result} end
+	return result, errors
 end

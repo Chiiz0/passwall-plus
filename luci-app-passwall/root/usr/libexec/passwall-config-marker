@@ -1,0 +1,11 @@
+#!/usr/bin/lua
+-- Runtime DNS bookkeeping must not race with local/cloud configuration commits.
+local T = require 'luci.passwall.config_transaction'
+if arg[1] ~= 'set' and arg[1] ~= 'delete' and arg[1] ~= 'flush' then os.exit(1) end
+local ok = T.run(function()
+	local cursor = require('uci').cursor()
+	if arg[1] == 'set' then cursor:set('passwall', '@global[0]', 'dnsmasq_dns_redirect', '1')
+	else cursor:delete('passwall', '@global[0]', arg[1] == 'flush' and 'flush_set' or 'dnsmasq_dns_redirect') end
+	T.commit(cursor, 'passwall')
+end)
+os.exit(ok and 0 or 1)

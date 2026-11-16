@@ -14,6 +14,12 @@ local i18n = require "luci.i18n"
 local jsonStringify = luci.jsonc.stringify
 local jsonParse = luci.jsonc.parse
 
+local function identifier(value)
+	if type(value) == "string" and #value <= 128 and value:match("^[%w_%-]+$") then return value end
+	http.status(400, "Invalid identifier")
+	return nil
+end
+
 function index()
 	if not nixio.fs.access("/etc/config/passwall") then
 		if nixio.fs.access("/usr/share/passwall/0_default_config") then
@@ -25,8 +31,8 @@ function index()
 	local appname = api.appname		-- global definitions not available
 	local fs = api.fs
 	entry({"admin", "services", appname}).dependent = true
-	entry({"admin", "services", appname, "show"}, call("show_menu")).leaf = true
-	entry({"admin", "services", appname, "hide"}, call("hide_menu")).leaf = true
+	entry({"admin", "services", appname, "show"}, call("menu_action", "show_menu")).leaf = true
+	entry({"admin", "services", appname, "hide"}, call("menu_action", "hide_menu")).leaf = true
 	local e
 	if api.uci_get_c("@global[0]", "hide_from_luci") ~= "1" then
 		e = entry({"admin", "services", appname}, alias("admin", "services", appname, "overview"), "PassWall Plus", -1)
@@ -63,15 +69,15 @@ function index()
 
 	--[[ API ]]
 	entry({"admin", "services", appname, "plus_status"}, call("plus_status")).leaf = true
-	entry({"admin", "services", appname, "plus_create"}, post("plus_create")).leaf = true
-	entry({"admin", "services", appname, "server_update_config"}, call("server_update_config")).leaf = true
+	entry({"admin", "services", appname, "plus_create"}, post("config_action", "plus_create")).leaf = true
+	entry({"admin", "services", appname, "server_update_config"}, post("config_action", "server_update_config")).leaf = true
 	entry({"admin", "services", appname, "server_status"}, call("server_status")).leaf = true
 	entry({"admin", "services", appname, "server_log"}, call("server_log")).leaf = true
 	entry({"admin", "services", appname, "server_get_log"}, call("server_get_log")).leaf = true
-	entry({"admin", "services", appname, "server_clear_log"}, call("server_clear_log")).leaf = true
-	entry({"admin", "services", appname, "link_add_node"}, call("link_add_node")).leaf = true
-	entry({"admin", "services", appname, "socks_autoswitch_add_node"}, call("socks_autoswitch_add_node")).leaf = true
-	entry({"admin", "services", appname, "socks_autoswitch_remove_node"}, call("socks_autoswitch_remove_node")).leaf = true
+	entry({"admin", "services", appname, "server_clear_log"}, post("write_action", "server_clear_log")).leaf = true
+	entry({"admin", "services", appname, "link_add_node"}, post("config_action", "link_add_node")).leaf = true
+	entry({"admin", "services", appname, "socks_autoswitch_add_node"}, post("config_action", "socks_autoswitch_add_node")).leaf = true
+	entry({"admin", "services", appname, "socks_autoswitch_remove_node"}, post("config_action", "socks_autoswitch_remove_node")).leaf = true
 	entry({"admin", "services", appname, "gen_client_config"}, call("gen_client_config")).leaf = true
 	entry({"admin", "services", appname, "get_now_use_node"}, call("get_now_use_node")).leaf = true
 	entry({"admin", "services", appname, "get_redir_log"}, call("get_redir_log")).leaf = true
@@ -79,51 +85,51 @@ function index()
 	entry({"admin", "services", appname, "get_chinadns_log"}, call("get_chinadns_log")).leaf = true
 	entry({"admin", "services", appname, "get_smartdns_log"}, call("get_smartdns_log")).leaf = true
 	entry({"admin", "services", appname, "get_log"}, call("get_log")).leaf = true
-	entry({"admin", "services", appname, "clear_log"}, call("clear_log")).leaf = true
+	entry({"admin", "services", appname, "clear_log"}, post("write_action", "clear_log")).leaf = true
 	entry({"admin", "services", appname, "index_status"}, call("index_status")).leaf = true
 	entry({"admin", "services", appname, "haproxy_status"}, call("haproxy_status")).leaf = true
 	entry({"admin", "services", appname, "socks_status"}, call("socks_status")).leaf = true
 	entry({"admin", "services", appname, "connect_status"}, call("connect_status")).leaf = true
 	entry({"admin", "services", appname, "ping_node"}, call("ping_node")).leaf = true
 	entry({"admin", "services", appname, "urltest_node"}, call("urltest_node")).leaf = true
-	entry({"admin", "services", appname, "update_config"}, call("update_config")).leaf = true
-	entry({"admin", "services", appname, "add_node"}, call("add_node")).leaf = true
-	entry({"admin", "services", appname, "set_node"}, call("set_node")).leaf = true
-	entry({"admin", "services", appname, "copy_node"}, call("copy_node")).leaf = true
-	entry({"admin", "services", appname, "clear_all_nodes"}, call("clear_all_nodes")).leaf = true
-	entry({"admin", "services", appname, "delete_select_nodes"}, call("delete_select_nodes")).leaf = true
-	entry({"admin", "services", appname, "reassign_group"}, call("reassign_group")).leaf = true
+	entry({"admin", "services", appname, "update_config"}, post("config_action", "update_config")).leaf = true
+	entry({"admin", "services", appname, "add_node"}, post("config_action", "add_node")).leaf = true
+	entry({"admin", "services", appname, "set_node"}, post("config_action", "set_node")).leaf = true
+	entry({"admin", "services", appname, "copy_node"}, post("config_action", "copy_node")).leaf = true
+	entry({"admin", "services", appname, "clear_all_nodes"}, post("config_action", "clear_all_nodes")).leaf = true
+	entry({"admin", "services", appname, "delete_select_nodes"}, post("config_action", "delete_select_nodes")).leaf = true
+	entry({"admin", "services", appname, "reassign_group"}, post("config_action", "reassign_group")).leaf = true
 	entry({"admin", "services", appname, "get_node"}, call("get_node")).leaf = true
-	entry({"admin", "services", appname, "save_node_list_opt"}, call("save_node_list_opt")).leaf = true
-	entry({"admin", "services", appname, "update_rules"}, call("update_rules")).leaf = true
-	entry({"admin", "services", appname, "rollback_rules"}, call("rollback_rules")).leaf = true
-	entry({"admin", "services", appname, "subscribe_del_node"}, call("subscribe_del_node")).leaf = true
-	entry({"admin", "services", appname, "subscribe_del_all"}, call("subscribe_del_all")).leaf = true
-	entry({"admin", "services", appname, "subscribe_manual"}, call("subscribe_manual")).leaf = true
-	entry({"admin", "services", appname, "subscribe_manual_all"}, call("subscribe_manual_all")).leaf = true
-	entry({"admin", "services", appname, "flush_set"}, call("flush_set")).leaf = true
+	entry({"admin", "services", appname, "save_node_list_opt"}, post("config_action", "save_node_list_opt")).leaf = true
+	entry({"admin", "services", appname, "update_rules"}, post("write_action", "update_rules")).leaf = true
+	entry({"admin", "services", appname, "rollback_rules"}, post("config_action", "rollback_rules")).leaf = true
+	entry({"admin", "services", appname, "subscribe_del_node"}, post("write_action", "subscribe_del_node")).leaf = true
+	entry({"admin", "services", appname, "subscribe_del_all"}, post("write_action", "subscribe_del_all")).leaf = true
+	entry({"admin", "services", appname, "subscribe_manual"}, post("config_action", "subscribe_manual")).leaf = true
+	entry({"admin", "services", appname, "subscribe_manual_all"}, post("config_action", "subscribe_manual_all")).leaf = true
+	entry({"admin", "services", appname, "flush_set"}, post("config_action", "flush_set")).leaf = true
 	entry({"admin", "services", appname, "get_shunt_rules"}, call("get_shunt_rules")).leaf = true
-	entry({"admin", "services", appname, "add_shunt_rule"}, call("add_shunt_rule")).leaf = true
-	entry({"admin", "services", appname, "delete_select_shunt_rules"}, call("delete_select_shunt_rules")).leaf = true
+	entry({"admin", "services", appname, "add_shunt_rule"}, post("config_action", "add_shunt_rule")).leaf = true
+	entry({"admin", "services", appname, "delete_select_shunt_rules"}, post("config_action", "delete_select_shunt_rules")).leaf = true
 
 	--[[rule_list]]
 	entry({"admin", "services", appname, "read_rulelist"}, call("read_rulelist")).leaf = true
 
 	--[[Components update]]
 	entry({"admin", "services", appname, "check_" .. appname}, call("app_check")).leaf = true
-	entry({"admin", "services", appname, "update_" .. appname}, call("app_update")).leaf = true
+	entry({"admin", "services", appname, "update_" .. appname}, call("component_action", "app_update")).leaf = true
 	local coms = require "luci.passwall.com"
 	local com
 	for _, com in ipairs(coms.order) do
 		entry({"admin", "services", appname, "check_" .. com}, call("com_check", com)).leaf = true
-		entry({"admin", "services", appname, "update_" .. com}, call("com_update", com)).leaf = true
+		entry({"admin", "services", appname, "update_" .. com}, call("component_action", "com_update", com)).leaf = true
 		entry({"admin", "services", appname, "version_" .. com}, call("com_version", com)).leaf = true
 	end
 
 	--[[Backup]]
-	entry({"admin", "services", appname, "create_backup"}, call("create_backup")).leaf = true
-	entry({"admin", "services", appname, "restore_backup"}, call("restore_backup")).leaf = true
-	entry({"admin", "services", appname, "reset_config"}, call("reset_config")).leaf = true
+	entry({"admin", "services", appname, "create_backup"}, post("config_action", "create_backup")).leaf = true
+	entry({"admin", "services", appname, "restore_backup"}, post("config_action", "restore_backup")).leaf = true
+	entry({"admin", "services", appname, "reset_config"}, post("config_action", "reset_config")).leaf = true
 
 	--[[geoview]]
 	entry({"admin", "services", appname, "geo_view"}, call("geo_view")).leaf = true
@@ -148,43 +154,29 @@ local function http_write_json_error(data)
 end
 
 function show_menu()
-	api.sh_uci_del(c_config, "@global[0]", "hide_from_luci", true)
+	uci_del("@global[0]", "hide_from_luci"); uci_save(true)
 	api.remove("/tmp/luci-*")
-	luci.sys.call("/etc/init.d/rpcd restart >/dev/null")
+	require("luci.passwall.config_transaction").after(function()
+		luci.sys.call("(sleep 1; /etc/init.d/rpcd restart) >/dev/null 2>&1 &")
+	end)
 	http.redirect(api.url())
 end
 
 function hide_menu()
-	api.sh_uci_set(c_config, "@global[0]", "hide_from_luci", "1", true)
+	uci_set("@global[0]", "hide_from_luci", "1"); uci_save(true)
 	api.remove("/tmp/luci-*")
-	luci.sys.call("/etc/init.d/rpcd restart >/dev/null")
+	require("luci.passwall.config_transaction").after(function()
+		luci.sys.call("(sleep 1; /etc/init.d/rpcd restart) >/dev/null 2>&1 &")
+	end)
 	http.redirect(luci.dispatcher.build_url("admin", "status", "overview"))
 end
 
 function link_add_node()
-	-- 分片接收以突破uhttpd的限制
-	local tmp_file = "/tmp/links.conf"
-	local chunk = http.formvalue("chunk")
-	local chunk_index = tonumber(http.formvalue("chunk_index"))
-	local total_chunks = tonumber(http.formvalue("total_chunks"))
-	local group = http.formvalue("group") or "default"
-
-	if chunk and chunk_index ~= nil and total_chunks ~= nil then
-		-- 按顺序拼接到文件
-		local mode = "a"
-		if chunk_index == 0 then
-			mode = "w"
-		end
-		local f = io.open(tmp_file, mode)
-		if f then
-			f:write(chunk)
-			f:close()
-		end
-		-- 如果是最后一片，才执行
-		if chunk_index + 1 == total_chunks then
-			luci.sys.call("lua /usr/share/passwall/subscribe.lua add " .. group)
-		end
-	end
+	local result = require("luci.passwall.link_import").upload(luci.dispatcher.context.authsession, {
+		index=http.formvalue("chunk_index"), count=http.formvalue("total_chunks"),
+		chunk=http.formvalue("chunk"), group=http.formvalue("group") or "default", id=http.formvalue("upload_id")
+	})
+	http_write_json(result)
 end
 
 function socks_autoswitch_add_node()
@@ -228,13 +220,14 @@ end
 
 
 function gen_client_config()
-	local id = http.formvalue("id")
-	local config_file = api.TMP_PATH .. "/config_" .. id
-	luci.sys.call(string.format("/usr/share/passwall/app.sh run_socks flag=config_%s node=%s bind=127.0.0.1 socks_port=1080 config_file=%s no_run=1", id, id, config_file))
+	local id = identifier(http.formvalue("id")); if not id then return end
+	if uci:get(c_config, id) ~= "nodes" then http.status(404, "Node not found"); return end
+	local config_file = api.TMP_PATH .. "/config_" .. id .. "_" .. api.gen_random_char()
+	luci.sys.call(string.format("/usr/share/passwall/app.sh run_socks flag=config_%s node=%s bind=127.0.0.1 socks_port=1080 config_file=%s no_run=1", id, id, util.shellquote(config_file)))
 	if nixio.fs.access(config_file) then
 		http.prepare_content("application/json")
-		http.write(luci.sys.exec("cat " .. config_file))
-		api.remove(config_file)
+		http.write(fs.readfile(config_file))
+		fs.remove(config_file)
 	else
 		http.redirect(api.url("node_list"))
 	end
@@ -251,7 +244,7 @@ function get_now_use_node()
 end
 
 function get_redir_log()
-	local id = http.formvalue("id")
+	local id = identifier(http.formvalue("id")); if not id then return end
 	local path = api.TMP_PATH .. "/acl/" .. id
 
 	local function alert(msg)
@@ -286,7 +279,7 @@ function get_redir_log()
 end
 
 function get_socks_log()
-	local name = http.formvalue("name")
+	local name = identifier(http.formvalue("name")); if not name then return end
 	local path = api.TMP_PATH .. "/" .. name .. ".log"
 	if fs.access(path) then
 		http.prepare_content("text/plain; charset=utf-8")
@@ -298,7 +291,7 @@ function get_socks_log()
 end
 
 function get_chinadns_log()
-	local flag = http.formvalue("flag")
+	local flag = identifier(http.formvalue("flag")); if not flag then return end
 	local path = api.TMP_PATH .. "/acl/" .. flag .. "/chinadns_ng.log"
 	if flag ~= "default" then
 		local global_node = uci_get("@global[0]", "node") or "nil"
@@ -423,6 +416,7 @@ function haproxy_status()
 end
 
 function socks_status()
+	if not identifier(http.formvalue("id")) then return end
 	local e = {}
 	local index = http.formvalue("index")
 	local id = http.formvalue("id")
@@ -441,7 +435,7 @@ function connect_status()
 	local e = {}
 	e.use_time = ""
 	local url = http.formvalue("url")
-	if not url or url == "" then
+	if type(url) ~= "string" or not url:match("^https?://") or url:find("%z") then
 		http_write_json(e)
 		return
 	end
@@ -451,7 +445,7 @@ function connect_status()
 	local proxy_mode = uci_get("@global[0]", "tcp_proxy_mode") or "proxy"
 	local localhost_proxy = uci_get("@global[0]", "localhost_proxy") or "1"
 	local socks_server = (localhost_proxy == "0") and api.get_cache_var("GLOBAL_SOCKS_server") or ""
-	local curl_args = "-w '%{http_code}:%{time_pretransfer}:%{time_starttransfer}' " .. util.shellquote(url)
+	local curl_args = "-w '%{http_code}:%{time_pretransfer}:%{time_starttransfer}' --url " .. util.shellquote(url)
 	if socks_server and socks_server ~= "" then
 		if (chn_list == "proxy" and gfw_list == "0" and proxy_mode ~= "proxy" and aliyun ~= nil) or (chn_list == "0" and gfw_list == "0" and proxy_mode == "proxy") then
 		-- 中国列表+阿里 or 全局
@@ -480,15 +474,18 @@ function ping_node()
 	local address = http.formvalue("address")
 	local port = http.formvalue("port")
 	local type = http.formvalue("type") or "icmp"
+	if not address or #address > 253 or (not api.is_ip(address) and not api.datatypes.hostname(address)) then http.status(400, "Invalid host"); return end
+	port = tonumber(port)
+	if type == "tcping" and (not port or port % 1 ~= 0 or port < 1 or port > 65535) then http.status(400, "Invalid port"); return end
 	local e = {}
 	e.index = index
 	if type == "tcping" and luci.sys.exec("echo -n $(command -v tcping)") ~= "" then
 		if api.is_ipv6(address) then
 			address = api.get_ipv6_only(address)
 		end
-		e.ping = luci.sys.exec(string.format("echo -n $(tcping -q -c 1 -i 1 -t 2 -p %s %s 2>&1 | grep -o 'time=[0-9]*' | awk -F '=' '{print $2}') 2>/dev/null", port, address))
+		e.ping = luci.sys.exec(string.format("echo -n $(tcping -q -c 1 -i 1 -t 2 -p %s %s 2>&1 | grep -o 'time=[0-9]*' | awk -F '=' '{print $2}') 2>/dev/null", port, util.shellquote(address)))
 	else
-		e.ping = luci.sys.exec("echo -n $(ping -c 1 -W 1 %q 2>&1 | grep -o 'time=[0-9]*' | awk -F '=' '{print $2}') 2>/dev/null" % address)
+		e.ping = luci.sys.exec("echo -n $(ping -c 1 -W 1 %s 2>&1 | grep -o 'time=[0-9]*' | awk -F '=' '{print $2}') 2>/dev/null" % util.shellquote(address))
 	end
 	http_write_json(e)
 end
@@ -768,23 +765,27 @@ end
 function reassign_group()
 	local ids = http.formvalue("ids") or ""
 	local group = http.formvalue("group") or "default"
+	if #group > 256 or group:find("%z") then http.status(400, "Invalid group"); return end
+	local nodes = {}
 	for id in ids:gmatch("([^,]+)") do
-		if group ~="" and group ~= "default" then
-			api.sh_uci_set(c_config, id, "group", group)
-		else
-			api.sh_uci_del(c_config, id, "group")
-		end
+		if not identifier(id) then return end
+		if uci:get(c_config, id) ~= "nodes" then http.status(400, "Invalid node"); return end
+		nodes[#nodes + 1] = id
 	end
-	api.sh_uci_commit(c_config)
+	if #nodes == 0 then http.status(400, "Missing nodes"); return end
+	for _, id in ipairs(nodes) do
+		if group ~= "" and group ~= "default" then uci_set(id, "group", group)
+		else uci_del(id, "group") end
+	end
+	uci_save(true)
 	http_write_json({ status = "ok" })
 end
 
 function save_node_list_opt()
-	local option = http.formvalue("option") or ""
+	local option = identifier(http.formvalue("option")); if not option then return end
 	local value = http.formvalue("value") or ""
-	if option ~= "" then
-		api.sh_uci_set(c_config, "@global_other[0]", option, value, true)
-	end
+	if #value > 8192 or value:find("%z") then http.status(400, "Invalid option value"); return end
+	uci_set("@global_other[0]", option, value); uci_save(true)
 	http_write_json({ status = "ok" })
 end
 
@@ -794,7 +795,7 @@ function update_rules()
 		http_write_json_error({ message = "missing update target" })
 		return
 	end
-	luci.sys.call("lua /usr/share/passwall/rule_update.lua log '" .. update .. "' > /dev/null 2>&1 &")
+	luci.sys.call("lua /usr/share/passwall/rule_update.lua log " .. util.shellquote(update) .. " >/dev/null 2>&1 &")
 	http_write_json()
 end
 
@@ -811,7 +812,9 @@ function rollback_rules()
 	fs.move(bak_dir .. arg_type .. ".dat", geo_dir .. arg_type .. ".dat")
 	fs.rmdir(bak_dir)
 	if geo2rule == "1" and rules ~= "" then
-		luci.sys.call("lua /usr/share/passwall/rule_update.lua log '" .. rules .. "' rollback > /dev/null")
+		require("luci.passwall.config_transaction").after(function()
+			luci.sys.call("lua /usr/share/passwall/rule_update.lua log " .. util.shellquote(rules) .. " rollback >/dev/null 2>&1 &")
+		end)
 	end
 	uci_set("@global[0]", "flush_set", "1")
 	uci_save(true)
@@ -836,6 +839,7 @@ function server_update_config()
 end
 
 function server_status()
+	if not identifier(http.formvalue("id")) then return end
 	local e = {}
 	e.index = http.formvalue("index")
 	e.status = luci.sys.call(string.format("/bin/busybox top -bn1 | grep -v 'grep' | grep '%s/bin/' | grep -i '%s' >/dev/null", appname .. "_server", http.formvalue("id"))) == 0
@@ -843,11 +847,11 @@ function server_status()
 end
 
 function server_log()
-	local id = http.formvalue("id")
+	local id = identifier(http.formvalue("id")); if not id then return end
 	local f_file = api.S_TMP_PATH .. "/" .. id .. ".log"
 	if nixio.fs.access(f_file) then
-		local content = luci.sys.exec("cat " .. f_file)
-		content = content:gsub("\n", "<br />")
+		http.prepare_content("text/plain; charset=utf-8")
+		local content = fs.readfile(f_file) or ""
 		http.write(content)
 	else
 		http.write(string.format("<script>alert('%s');window.close();</script>", i18n.translate("Not enabled log")))
@@ -929,139 +933,46 @@ function read_rulelist()
 	end
 end
 
-local backup_files = {
-	"/etc/config/passwall",
-	"/etc/config/passwall_server",
-	"/etc/passwall/rules/block_host",
-	"/etc/passwall/rules/block_ip",
-	"/etc/passwall/rules/direct_host",
-	"/etc/passwall/rules/direct_ip",
-	"/etc/passwall/rules/proxy_host",
-	"/etc/passwall/rules/proxy_ip",
-	"/etc/passwall/rules/lanlist_ipv4",
-	"/etc/passwall/rules/lanlist_ipv6",
-	"/etc/passwall/rules/domains_excluded"
-}
-
 function create_backup()
-	local date = os.date("%y%m%d%H%M")
-	local tar_file = "/tmp/passwall-" .. date .. "-backup.tar.gz"
-	local version_file = "/tmp/passwall-version"
-	local version = api.get_version():match("^([^-]+)")
-	api.remove(tar_file)
-	fs.writefile(version_file, version .. "\n")
-	local cmd = "tar -czf " .. tar_file .. " " .. table.concat(backup_files, " ") .. " " .. "-C /tmp passwall-version"
-	luci.sys.call(cmd)
-	api.remove(version_file)
-	http.header("Content-Disposition", "attachment; filename=passwall-" .. date .. "-backup.tar.gz")
-	http.header("X-Backup-Filename", "passwall-" .. date .. "-backup.tar.gz")
+	local runtime = require "luci.passwall.backup_runtime"
+	local data = runtime.create(luci.dispatcher.context.authsession, api.get_version())
+	local filename = "passwall-" .. os.date("%Y%m%d%H%M%S") .. "-backup.tar.gz"
+	http.header("Content-Disposition", "attachment; filename=" .. filename)
+	http.header("X-Backup-Filename", filename)
 	http.prepare_content("application/octet-stream")
-	http.write(fs.readfile(tar_file))
-	api.remove(tar_file)
+	http.write(data)
 end
 
 function restore_backup()
-	local type = http.formvalue("type")
-	local result = { status = "error", message = "unknown error" }
-	local ok, err = pcall(function()
-		local filename = http.formvalue("filename")
-		local chunk = http.formvalue("chunk")
-		local chunk_index = tonumber(http.formvalue("chunk_index") or "-1")
-		local total_chunks = tonumber(http.formvalue("total_chunks") or "-1")
-		if not filename then
-			result = { status = "error", message = "Missing filename" }
-			return
-		end
-		if not chunk then
-			result = { status = "error", message = "Missing chunk data" }
-			return
-		end
-		local file_path = "/tmp/" .. filename
-		local decoded = nixio.bin.b64decode(chunk)
-		if not decoded then
-			result = { status = "error", message = "Base64 decode failed" }
-			return
-		end
-		local fp = io.open(file_path, "a+")
-		if not fp then
-			result = { status = "error", message = "Failed to open file: " .. file_path }
-			return
-		end
-		fp:write(decoded)
-		fp:close()
-		if chunk_index + 1 == total_chunks then
+	local kind = http.formvalue("type")
+	local result = require("luci.passwall.backup_runtime").upload(luci.dispatcher.context.authsession, {
+		kind=kind, index=http.formvalue("chunk_index"), count=http.formvalue("total_chunks"),
+		chunk=http.formvalue("chunk"), id=http.formvalue("upload_id")
+	}, api.get_version())
+	if result.restored then
+		-- Release before starting a service that waits for this same update lock.
+		if kind ~= "server" then
 			uci:revert(c_config)
-			uci:revert(api.s_config)
-			luci.sys.call("echo '' > /tmp/log/passwall.log")
-			api.log(" * PassWall 备份文件上传成功…")
-			local version_file = "passwall-version"
-			local version = luci.sys.exec("tar -xOf " .. file_path .. " " .. version_file .. " 2>/dev/null"):match("^%s*(.-)%s*$")
-			if version and version ~= "" then
-				api.log(" * 备份文件由 PassWall " .. version .. " 生成。")
-			end
-			local temp_dir = '/tmp/passwall_bak'
-			luci.sys.call("mkdir -p " .. temp_dir)
-			if luci.sys.call("tar -xzf " .. file_path .. " -C " .. temp_dir) == 0 then
-				for _, backup_file in ipairs(backup_files) do
-					local is_server_config = backup_file == "/etc/config/passwall_server"
-					if type == "all" or (type == "client" and not is_server_config) or (type == "server" and is_server_config) then
-						local temp_file = temp_dir .. backup_file
-						if fs.access(temp_file) then
-							luci.sys.call("cp -f " .. temp_file .. " " .. backup_file)
-						end
-					end
-				end
-				if type == "all" or type == "client" then
-					api.log(" * PassWall 备份还原成功…")
-					api.log(" * 重启 PassWall 服务中…\n")
-					api.sh_uci_set(c_config, "@global[0]", "flush_set", "1", true)
-					luci.sys.call('/etc/init.d/passwall restart > /dev/null 2>&1 &')
-				end
-				if type == "all" or type == "server" then
-					luci.sys.call('/etc/init.d/passwall_server restart > /dev/null 2>&1 &')
-				end
-				result = { status = "success", message = "Upload completed", path = file_path }
-			else
-				api.log(" * PassWall 备份文件解压失败，请重试！")
-				result = { status = "error", message = "Decompression failed" }
-			end
-			api.remove(temp_dir)
-			api.remove(file_path)
-		else
-			result = { status = "success", message = "Chunk received" }
+			require("luci.passwall.config_transaction").after(function() luci.sys.call('/etc/init.d/passwall restart >/dev/null 2>&1 &') end)
 		end
-	end)
-	if not ok then
-		result = { status = "error", message = tostring(err) }
+		if kind ~= "client" then
+			uci:revert(api.s_config)
+			require("luci.passwall.config_transaction").after(function() luci.sys.call('/etc/init.d/passwall_server restart >/dev/null 2>&1 &') end)
+		end
 	end
 	http_write_json(result)
 end
 
 function reset_config()
-	local type = http.formvalue("type")
-	if type == "client" then
-		uci:revert(c_config)
-		luci.sys.call("echo '' > /tmp/log/passwall.log")
-		luci.sys.call('/etc/init.d/passwall stop')
-		if luci.sys.call('[ -s "/usr/share/passwall/0_default_config" ]') == 0 then
-			luci.sys.call('cp -f /usr/share/passwall/0_default_config /etc/config/passwall')
-			local files = {
-				"direct_host", "direct_ip", "proxy_host", "proxy_ip", "block_host", "block_ip",
-				"lanlist_ipv4", "lanlist_ipv6", "domains_excluded"
-			}
-			for _, f in ipairs(files) do
-				luci.sys.call("cp -f /usr/share/passwall/rules/" .. f .. " /etc/passwall/rules/" .. f)
-			end
-			api.log(" * 恢复默认配置成功。")
-		else
-			api.log(" * 找不到默认配置文件，重置失败！")
-		end
-	elseif type == "server" then
-		uci:revert(api.s_config)
-		luci.sys.call("echo '' > /tmp/log/passwall_server.log")
-		luci.sys.call('/etc/init.d/passwall_server stop')
-		luci.sys.call("echo \"config global 'global'\" > /etc/config/passwall_server")
-	end
+	local kind = http.formvalue("type")
+	require("luci.passwall.backup_runtime").reset(luci.dispatcher.context.authsession, kind)
+	local config = kind == "client" and c_config or api.s_config
+	uci:revert(config)
+	require("luci.passwall.config_transaction").after(function()
+		luci.sys.call('/etc/init.d/' .. config .. ' stop >/dev/null 2>&1 &')
+	end)
+	api.log(" * 恢复默认配置成功。")
+	http_write_json({status="success"})
 end
 
 function geo_view()
@@ -1101,13 +1012,14 @@ function geo_view()
 	local geo_type, file_path, cmd
 	local geo_string = ""
 	local bin = api.finded_com("geoview")
+	if not bin then http.status(503, "Geoview unavailable"); return end
 	if action == "lookup" then
 		if api.datatypes.ipaddr(value) or api.datatypes.ip6addr(value) then
 			geo_type, file_path = "geoip", geoip_path
 		else
 			geo_type, file_path = "geosite", geosite_path
 		end
-		cmd = string.format("%q -type %q -action lookup -input %q -value %q -lowmem=true", bin, geo_type, file_path, value)
+		cmd = string.format("%s -type %s -action lookup -input %s -value %s -lowmem=true", util.shellquote(bin), util.shellquote(geo_type), util.shellquote(file_path), util.shellquote(value))
 		geo_string = luci.sys.exec(cmd):lower()
 		if geo_string ~= "" then
 			local lines, rules, seen = {}, {}, {}
@@ -1141,7 +1053,7 @@ function geo_view()
 		if prefix and list and list ~= "" then
 			geo_type = prefix:sub(1, -2)
 			file_path = (geo_type == "geoip") and geoip_path or geosite_path
-			cmd = string.format("%q -type %q -action extract -input %q -list %q -lowmem=true", bin, geo_type, file_path, list)
+			cmd = string.format("%s -type %s -action extract -input %s -list %s -lowmem=true", util.shellquote(bin), util.shellquote(geo_type), util.shellquote(file_path), util.shellquote(list))
 			geo_string = luci.sys.exec(cmd)
 		end
 	end
@@ -1167,50 +1079,50 @@ function subscribe_del_all()
 end
 
 function subscribe_manual()
-	local section = http.formvalue("section") or ""
-	local current_url = http.formvalue("url") or ""
-	if section == "" or current_url == "" then
-		http_write_json({ success = false, msg = "Missing section or URL, skip." })
-		return
+	local section = identifier(http.formvalue("section")); if not section then return end
+	local current_url = http.formvalue("url")
+	if type(current_url) ~= "string" or current_url == "" or #current_url > 8192 or current_url:find("%z") then
+		http.status(400, "Invalid subscription URL"); return
 	end
-	local uci_url = api.sh_uci_get(c_config, section, "url")
-	if not uci_url or uci_url == "" then
+	local uci_url = uci_get(section, "url")
+	if uci:get(c_config, section) ~= "subscribe_list" or not uci_url or uci_url == "" then
 		http_write_json({ success = false, msg = i18n.translate("Please save and apply before manually subscribing.") })
 		return
 	end
 	if uci_url ~= current_url then
-		api.sh_uci_set(c_config, section, "url", current_url, true)
+		uci_set(section, "url", current_url); uci_save(true)
 	end
-	luci.sys.call("lua /usr/share/" .. appname .. "/subscribe.lua start " .. section .. " manual >/dev/null 2>&1 &")
+	require("luci.passwall.config_transaction").after(function() luci.sys.call("lua /usr/share/" .. appname .. "/subscribe.lua start " .. util.shellquote(section) .. " manual >/dev/null 2>&1 &") end)
 	http_write_json({ success = true, msg = "Subscribe triggered." })
 end
 
 function subscribe_manual_all()
-	local sections = http.formvalue("sections") or ""
-	local urls = http.formvalue("urls") or ""
-	if sections == "" or urls == "" then
-		http_write_json({ success = false, msg = "Missing section or URL, skip." })
-		return
+	local sections = jsonParse(http.formvalue("sections") or "")
+	local urls = jsonParse(http.formvalue("urls") or "")
+	local function array(value)
+		if type(value) ~= "table" or #value < 1 or #value > 256 then return false end
+		for key in pairs(value) do if type(key) ~= "number" or key % 1 ~= 0 or key < 1 or key > #value then return false end end
+		return true
 	end
-	local section_list = util.split(sections, ",")
-	local url_list = util.split(urls, ",")
-	-- 检查是否存在未保存配置
-	for i, section in ipairs(section_list) do
-		local uci_url = api.sh_uci_get(c_config, section, "url")
-		if not uci_url or uci_url == "" then
-			http_write_json({ success = false, msg = i18n.translate("Please save and apply before manually subscribing.") })
-			return
+	if not array(sections) or not array(urls) or #sections ~= #urls then
+		http.status(400, "Invalid subscription list"); return
+	end
+	local seen = {}
+	for i, section in ipairs(sections) do
+		if not identifier(section) or seen[section] or type(urls[i]) ~= "string" or urls[i] == "" or #urls[i] > 8192 or urls[i]:find("%z") then
+			http.status(400, "Invalid subscription"); return
+		end
+		seen[section] = true
+		if uci:get(c_config, section) ~= "subscribe_list" or not uci_get(section, "url") then
+			http_write_json({ success = false, msg = i18n.translate("Please save and apply before manually subscribing.") }); return
 		end
 	end
-	-- 保存有变动的url
-	for i, section in ipairs(section_list) do
-		local current_url = url_list[i] or ""
-		local uci_url = api.sh_uci_get(c_config, section, "url")
-		if current_url ~= "" and uci_url ~= current_url then
-			api.sh_uci_set(c_config, section, "url", current_url, true)
-		end
+	local changed = false
+	for i, section in ipairs(sections) do
+		if uci_get(section, "url") ~= urls[i] then uci_set(section, "url", urls[i]); changed = true end
 	end
-	luci.sys.call("lua /usr/share/" .. appname .. "/subscribe.lua start all manual >/dev/null 2>&1 &")
+	if changed then uci_save(true) end
+	require("luci.passwall.config_transaction").after(function() luci.sys.call("lua /usr/share/" .. appname .. "/subscribe.lua start all manual >/dev/null 2>&1 &") end)
 	http_write_json({ success = true, msg = "Subscribe triggered." })
 end
 
@@ -1221,7 +1133,7 @@ function flush_set()
 		uci_set('@global[0]', "flush_set", "1")
 		uci_save(true, true)
 	else
-		api.sh_uci_set(c_config, "@global[0]", "flush_set", "1", true)
+		uci_set("@global[0]", "flush_set", "1"); uci_save(true)
 	end
 	if redirect == "1" then
 		http.redirect(api.url("log"))
@@ -1330,4 +1242,58 @@ function gen_wireguard_key()
 	else
 		http_write_json_error()
 	end
+end
+
+-- Serialize local shortcuts with subscriptions, cloud tasks and guard recovery.
+local function config_access(action, permission)
+	local backup = action == "restore_backup" or action == "reset_config"
+	local server = action:match("^server_") or (backup and http.formvalue("type") == "server")
+	local configs = {server and api.s_config or c_config}
+	if (backup and http.formvalue("type") == "all") or action == "create_backup" then configs = {c_config, api.s_config} end
+	for _, config in ipairs(configs) do
+		local access = util.ubus("session", "access", {ubus_rpc_session=luci.dispatcher.context.authsession,
+			scope="uci", object=config, ["function"]=permission or (action == "create_backup" and "read" or "write")})
+		if not access or not access.access then http.status(403, "Forbidden"); return nil end
+	end
+	return configs
+end
+
+function config_action(action)
+	local configs = config_access(action); if not configs then return end
+	local T = require "luci.passwall.config_transaction"
+	local ok, err = T.run(function()
+		local expected = http.formvalue("config_revision")
+		if expected and not T.check(expected, configs[1]) then error("config_conflict", 0) end
+		return _M[action]()
+	end)
+	if not ok then
+		for _, config in ipairs(configs) do pcall(function() uci:revert(config) end) end
+		http.status(409, "Configuration operation rejected")
+		local message = tostring(err):match("^[a-z_]+$") and err or "configuration_operation_failed"
+		http_write_json({status="error", code=0, message=message})
+	end
+end
+
+function write_action(action, ...)
+	if not config_access(action) then return end
+	return _M[action](...)
+end
+
+function component_action(action, component)
+	if http.formvalue("task") == "progress" then
+		if not config_access(action, "read") then return end
+	else
+		if not luci.dispatcher.test_post_security() then return end
+		if not config_access(action) then return end
+	end
+	return _M[action](component)
+end
+
+function menu_action(action)
+	if http.getenv("REQUEST_METHOD") == "POST" then
+		if not luci.dispatcher.test_post_security() then return end
+		return config_action(action)
+	end
+	if not config_access(action) then return end
+	require("luci.template").render("passwall/menu_visibility", {show_menu=action == "show_menu"})
 end

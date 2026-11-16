@@ -16,7 +16,7 @@ assert(cursor:foreach("passwall", nil, function(section)
 	io.write("section:")
 	value(section[".type"])
 	value(section[".anonymous"] and "" or section[".name"])
-	if section[".type"] == "global" then section.dnsmasq_dns_redirect = nil end
+	if section[".type"] == "global" then section.dnsmasq_dns_redirect = nil; section.flush_set = nil end
 	if section[".type"] == "acl_rule" and section.enabled == "1" and section.bind_enable == "1" then
 		local mac, ip = policy.normalize_mac(section.bind_mac), policy.normalize_ipv4(section.bind_ip)
 		if mac and ip then

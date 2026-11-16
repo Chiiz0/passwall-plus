@@ -29,6 +29,7 @@ if not update_lock:lock("tlock") then
 	end
 end
 -- Record the running task in the same file: s = subscription, r = rule update.
+require("luci.passwall.backup_runtime").recover()
 update_lock:write("r")
 update_lock:seek(0)
 api.uci:revert(api.c_config)

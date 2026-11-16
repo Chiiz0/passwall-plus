@@ -1,3 +1,4 @@
+<%+passwall/request%>
 <%
 local map = self.map
 local api = map.api
@@ -11,9 +12,7 @@ local api = map.api
 		if (!confirm("<%:Delete the subscribed node%>: " + remark + " ?"))
 			return false;
 
-		fetch('<%= api.url("subscribe_del_node") %>?remark=' + encodeURIComponent(remark), {
-			method: "GET"
-		}).then(res => {
+		PasswallRequest.fetch('<%= api.url("subscribe_del_node") %>', {remark: remark}).then(res => {
 			if (res.ok) {
 				location.reload();
 			} else {
@@ -27,9 +26,7 @@ local api = map.api
 		if (!confirm("<%:Are you sure you want to delete all subscribed nodes?%>"))
 			return false;
 
-		fetch('<%= api.url("subscribe_del_all") %>', {
-			method: "GET"
-		}).then(res => {
+		PasswallRequest.fetch('<%= api.url("subscribe_del_all") %>').then(res => {
 			if (res.ok) {
 				location.reload();
 			} else {
@@ -47,10 +44,7 @@ local api = map.api
 			return;
 		}
 
-		fetch('<%= api.url("subscribe_manual") %>?section='
-			+ encodeURIComponent(sectionId)
-			+ '&url='
-			+ encodeURIComponent(currentUrl))
+		PasswallRequest.fetch('<%= api.url("subscribe_manual") %>', {section: sectionId, url: currentUrl})
 		.then(response => response.json())
 		.then(data => {
 			if (!data.success) {
@@ -58,7 +52,7 @@ local api = map.api
 			} else {
 				window.location.href = '<%= api.url("log") %>'
 			}
-		});
+		}).catch(() => alert("<%:Operation failed. Reload the page and try again.%>"));
 	}
 
 	function ManualSubscribeAll() {
@@ -93,13 +87,10 @@ local api = map.api
 		}
 
 		var params = new URLSearchParams();
-		params.append("sections", sectionIds.join(","));
-		params.append("urls", urls.join(","));
+		params.append("sections", JSON.stringify(sectionIds));
+		params.append("urls", JSON.stringify(urls));
 
-		fetch('<%= api.url("subscribe_manual_all") %>', {
-			method: 'POST',
-			body: params
-		})
+		PasswallRequest.fetch('<%= api.url("subscribe_manual_all") %>', params)
 		.then(response => response.json())
 		.then(data => {
 			if (!data.success) {
@@ -107,7 +98,7 @@ local api = map.api
 			} else {
 				window.location.href = '<%= api.url("log") %>'
 			}
-		});
+		}).catch(() => alert("<%:Operation failed. Reload the page and try again.%>"));
 	}
 	//]]>
 </script>

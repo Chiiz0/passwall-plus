@@ -22,8 +22,10 @@ end
 local function backup_servers()
 	local DNSMASQ_DNS = api.uci_get("dhcp", "@dnsmasq[0]", "server")
 	if DNSMASQ_DNS and #DNSMASQ_DNS > 0 then
-		api.uci_set_c("@global[0]", "dnsmasq_servers", DNSMASQ_DNS)
-		api.uci_save_c(true)
+		assert(require("luci.passwall.config_transaction").run(function()
+			api.uci_set_c("@global[0]", "dnsmasq_servers", DNSMASQ_DNS)
+			api.uci_save_c(true)
+		end))
 	end
 end
 
@@ -35,13 +37,18 @@ local function restore_servers()
 			tinsert(dns_table, v)
 		end
 	end
-	local OLD_SERVER = api.uci_get(api.c_config, "@global[0]", "dnsmasq_servers")
+	local OLD_SERVER
+	assert(require("luci.passwall.config_transaction").run(function()
+		OLD_SERVER = api.uci_get(api.c_config, "@global[0]", "dnsmasq_servers")
+		if OLD_SERVER and #OLD_SERVER > 0 then
+			api.uci_del_c("@global[0]", "dnsmasq_servers")
+			api.uci_save_c(true)
+		end
+	end))
 	if OLD_SERVER and #OLD_SERVER > 0 then
 		for k, v in ipairs(OLD_SERVER) do
 			tinsert(dns_table, v)
 		end
-		api.uci_del_c("@global[0]", "dnsmasq_servers")
-		api.uci_save_c(true)
 	end
 	if dns_table and #dns_table > 0 then
 		api.uci_set("dhcp", "@dnsmasq[0]", "server", dns_table)

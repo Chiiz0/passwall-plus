@@ -38,7 +38,7 @@ local ok,err=pcall(function()
   p.apply(c,C.global(c),command.config)
  end
  progress('applying');check(C.hash(C.config)==journal.old_revision,'config_conflict');check(C.read('/tmp/.uci/passwall')=='','local_uncommitted_changes')
- journal.new_revision=C.hash(stage);journal.phase='executing'
+ journal.new_revision=C.hash(stage);journal.new_digest=C.config_digest(stage);journal.phase='executing'
  C.write(C.persist..'/rollback',C.read(C.config));C.save(C.persist..'/pending.json',journal)
  C.write(C.config,C.read(stage));unlock();progress('restarting')
  if not C.restart() then return C.rollback(journal) end

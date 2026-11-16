@@ -8,7 +8,7 @@ local api = map.api
 	<div class="cbi-section-descr">
 		<%:Backup or Restore Client and Server Configurations.%>
 		<br>
-		<font color="red"><%:Note: Restoring configurations across different versions may cause compatibility issues.%></font>
+		<font color="red"><%:Note: Only backups from the same application version can be restored. Package revisions may differ.%></font>
 	</div>
 </div>
 
@@ -126,6 +126,18 @@ local api = map.api
 </style>
 
 <script>
+	function backupError(response, status) {
+		if (status === 403) return "<%:Permission denied or session expired. Please sign in again.%>";
+		let code = '';
+		try { code = JSON.parse(response).message || ''; } catch (_) {}
+		if (code === 'config_busy') return "<%:Configuration is being updated. Please try again shortly.%>";
+		if (code === 'config_conflict') return "<%:Configuration changed during upload. Reload the page and upload again.%>";
+		if (code.indexOf('incompatible_backup') === 0) return "<%:This backup is incompatible. Use a backup from the same application version.%>";
+		if (code === 'backup_too_large') return "<%:The backup exceeds the size limit.%>";
+		if (code === 'restore_write_failed_rolled_back') return "<%:Restore failed. The previous files have been recovered.%>";
+		if (code.indexOf('restore_recovery') === 0) return "<%:An interrupted restore needs recovery. Check the system log before retrying.%>";
+		return "<%:Operation failed. Check the backup file and try again.%>";
+	}
 	function getBg(el) {
 		if (!el) return null;
 		const style = getComputedStyle(el);
@@ -150,11 +162,13 @@ local api = map.api
 
 	function dl_backup(btn) {
 		fetch('<%= api.url("create_backup") %>', {
-			method: 'POST'
+			method: 'POST',
+			headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+			body: 'token=' + encodeURIComponent('<%=luci.dispatcher.context.authtoken%>')
 		})
 		.then(response => {
 			if (!response.ok) {
-				throw new Error("备份失败！");
+				return response.text().then(text => { throw new Error(backupError(text, response.status)); });
 			}
 			const filename = response.headers.get("X-Backup-Filename");
 			if (!filename) {
@@ -188,8 +202,10 @@ local api = map.api
 			setTimeout(function () {
 				if (confirm(confirm_message)) {
 					const xhr = new XMLHttpRequest();
-					xhr.open("GET", '<%=api.url("reset_config")%>?type=' + type, false);
-					xhr.send();
+					xhr.open("POST", '<%=api.url("reset_config")%>?type=' + type, false);
+					xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+					xhr.send("token=" + encodeURIComponent("<%=luci.dispatcher.context.authtoken%>"));
+					if (xhr.status !== 200) { alert(backupError(xhr.responseText, xhr.status)); return; }
 					window.location.href = redirect;
 				}
 			}, 1000);
@@ -237,6 +253,7 @@ local api = map.api
 			chunkSize = chunkSize + (4 - (chunkSize % 4)) % 4;
 			const totalChunks = Math.ceil(base64Data.length / chunkSize);
 			let currentChunk = 0;
+			let uploadId = "";
 
 			function sendNextChunk() {
 				if (currentChunk < totalChunks) {
@@ -248,21 +265,23 @@ local api = map.api
 							if (xhr.status === 200) {
 								const resp = JSON.parse(xhr.responseText);
 								if (resp.status === "success") {
+									uploadId = resp.upload_id;
 									currentChunk++;
 									document.getElementById("upload-btn").value = "Uploading... " + Math.floor((currentChunk / totalChunks) * 100) + "%";
 									sendNextChunk();
 								} else {
-									alert("Upload error: " + resp.message);
+									alert(backupError(xhr.responseText, xhr.status));
 									document.getElementById("upload-btn").value = "<%:UL Restore%>";
 								}
 							} else {
-								alert("Upload failed with status " + xhr.status);
+								alert(backupError(xhr.responseText, xhr.status));
 								document.getElementById("upload-btn").value = "<%:UL Restore%>";
 							}
 						}
 					};
 					const formData = new FormData();
-					formData.append("filename", file.name);
+					formData.append("token", "<%=luci.dispatcher.context.authtoken%>");
+					formData.append("upload_id", uploadId);
 					formData.append("chunk", chunk);
 					formData.append("chunk_index", currentChunk);
 					formData.append("total_chunks", totalChunks);

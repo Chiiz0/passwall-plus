@@ -119,6 +119,13 @@ end
 
 function uci_save(cursor, config, commit, apply)
 	if not cursor then cursor = uci end
+	if require("luci.passwall.config_transaction").active() then
+		assert(cursor:save(config)); require("luci.passwall.config_transaction").commit(cursor, config)
+		if apply then require("luci.passwall.config_transaction").after(function()
+			sys.call("/etc/init.d/" .. config .. " reload >/dev/null 2>&1 &")
+		end) end
+		return true
+	end
 	if is_old_uci() then
 		cursor:save(config)
 		if commit then
@@ -139,33 +146,48 @@ function uci_save(cursor, config, commit, apply)
 	end
 end
 
+local function uci_key(config, section, option)
+	assert(type(config) == "string" and config:match("^[%w_%-]+$"), "invalid_config")
+	local key = config
+	if section then
+		assert(type(section) == "string" and (section:match("^[%w_%-]+$") or section:match("^@[%w_%-]+%[%-?%d+%]$")), "invalid_section")
+		key = key .. "." .. section
+	end
+	if option then
+		assert(type(option) == "string" and option:match("^[%w_%-]+$"), "invalid_option")
+		key = key .. "." .. option
+	end
+	return key
+end
+
 function sh_uci_get(config, section, option)
-	local _, val = exec_call(string.format("uci -q get %s.%s.%s", config, section, option))
+	local _, val = exec_call("uci -q get " .. util.shellquote(uci_key(config, section, option)))
 	return val
 end
 
 function sh_uci_set(config, section, option, val, commit)
-	exec_call(string.format("uci -q set %s.%s.%s=\"%s\"", config, section, option, val))
+	exec_call("uci -q set " .. util.shellquote(uci_key(config, section, option) .. "=" .. tostring(val)))
 	if commit then sh_uci_commit(config) end
 end
 
 function sh_uci_del(config, section, option, commit)
-	exec_call(string.format("uci -q delete %s.%s.%s", config, section, option))
+	exec_call("uci -q delete " .. util.shellquote(uci_key(config, section, option)))
 	if commit then sh_uci_commit(config) end
 end
 
 function sh_uci_add_list(config, section, option, val, commit)
-	exec_call(string.format("uci -q del_list %s.%s.%s=\"%s\"", config, section, option, val))
-	exec_call(string.format("uci -q add_list %s.%s.%s=\"%s\"", config, section, option, val))
+	local assignment = util.shellquote(uci_key(config, section, option) .. "=" .. tostring(val))
+	exec_call("uci -q del_list " .. assignment)
+	exec_call("uci -q add_list " .. assignment)
 	if commit then sh_uci_commit(config) end
 end
 
 function sh_uci_commit(config)
-	exec_call(string.format("uci -q commit %s", config))
+	exec_call("uci -q commit " .. util.shellquote(uci_key(config)))
 end
 
 function del_cache_var(key)
-	sys.call(string.format('. /usr/share/passwall2/utils.sh ; del_cache_var "%s"', key))
+	sys.call(string.format('. /usr/share/passwall/utils.sh ; del_cache_var %s', util.shellquote(tostring(key))))
 end
 
 function set_cache_var(key, val)
@@ -173,7 +195,7 @@ function set_cache_var(key, val)
 end
 
 function get_cache_var(key)
-	local val = sys.exec(string.format('. /usr/share/passwall/utils.sh ; echo -n $(get_cache_var "%s")', key))
+	local val = sys.exec(string.format('. /usr/share/passwall/utils.sh ; echo -n $(get_cache_var %s)', util.shellquote(tostring(key))))
 	if val == "" then val = nil end
 	return val
 end
@@ -1376,6 +1398,7 @@ function to_download(app_name, url, size, task_id, keep_files)
 
 	if size then
 		local kb1 = get_free_space("/tmp")
+		if not tonumber(size) or tonumber(size) < 0 then return {code = 1, error = i18n.translate("Invalid file size.")} end
 		if tonumber(size) > tonumber(kb1) then
 			return {code = 1, error = i18n.translatef("%s not enough space.", "/tmp")}
 		end
@@ -1432,13 +1455,19 @@ function to_download_progress(app_name, task_id, total_size)
 	return {code = 0, downloaded = downloaded, total = total_size, percent = percent}
 end
 
+local function update_file(app_name, file, kind, file_type)
+	local prefix = '/tmp/' .. app_name .. '_' .. kind .. '.'
+	return type(file) == 'string' and file:sub(1, #prefix) == prefix
+		and file:sub(#prefix + 1):match('^[%w_%-]+$') and fs.lstat(file, 'type') == file_type
+end
+
 function to_extract(app_name, file, subfix)
 	local result = check_path(app_name)
 	if result.code ~= 0 then
 		return result
 	end
 
-	if not file or file == "" or not fs.access(file) then
+	if not update_file(app_name, file, 'download', 'reg') then
 		return {code = 1, error = i18n.translate("File path required.")}
 	end
 
@@ -1502,13 +1531,14 @@ function to_move(app_name,file)
 	local app_path = result.app_path
 	local bin_path = file
 	local rm_tmp = "/tmp/" .. app_name .. "_download.*"
-	if fs.stat(file, "type") == "dir" then
+	if update_file(app_name, file, 'extract', 'dir') then
 		bin_path = file .. "/" .. com[app_name].name:lower()
 		rm_tmp = "/tmp/" .. app_name .. "_extract.*"
+	elseif not update_file(app_name, file, 'download', 'reg') then
+		return {code = 1, error = i18n.translate("Client file is required.")}
 	end
 
-	if not file or file == "" then
-		remove(rm_tmp)
+	if fs.lstat(bin_path, 'type') ~= 'reg' then
 		return {code = 1, error = i18n.translate("Client file is required.")}
 	end
 
@@ -1658,18 +1688,78 @@ end
 
 function set_default_cbi()
 	local cbi = require "luci.cbi"
+	if cbi.Map._passwall_transaction then return end
+	cbi.Map._passwall_transaction = true
 	if true then
 		--Map
 		local Map = cbi.Map
 		local default_init = Map.__init__
+		local default_parse = Map.parse
+		local default_formvalue = Map.formvalue
 		function Map.__init__(self, config, ...)
 			if not config then config = c_config end
+			assert(config == c_config or config == s_config, "invalid_config")
+			-- CBI's raw-source repair writes during construction, outside parse.
+			-- Repairs must use the validated reset/restore endpoints instead.
+			assert(fs.lstat("/etc/config/" .. config, "type") == "reg", "config_unavailable")
+			self.formvalue = function(map, key)
+				if key == "cbi.source" then return nil end
+				return default_formvalue(map, key)
+			end
 			default_init(self, config, ...)
 			self.api = require "luci.passwall.api"
+			local original = self.uci
+			self.uci = setmetatable({}, {__index = function(_, key)
+				if key == "commit" then return function(_, name)
+					return require("luci.passwall.config_transaction").commit(original, name)
+				end end
+				if key == "apply" then return function()
+					require("luci.passwall.config_transaction").after(function()
+						sys.call("/etc/init.d/" .. config .. " reload >/dev/null 2>&1 &")
+					end)
+					return true
+				end end
+				if type(original[key]) == "function" then return function(_, ...) return original[key](original, ...) end end
+				return original[key]
+			end})
+			self.apply_on_parse = false
+			self.config_revision = require("luci.passwall.config_transaction").form_revision(config)
+			local revision = cbi.Template("passwall/cbi/revision")
+			revision.map = self
+			self:append(revision)
 			if is_js_luci() == true then
 				self.apply_on_parse = false
 				self.is_js_luci = true
 			end
+		end
+		function Map.parse(self, ...)
+			if not self:submitstate() then return default_parse(self, ...) end
+			local T = require "luci.passwall.config_transaction"
+			local args, state = {...}, nil
+			local ok, err = T.run(function()
+				local access = util.ubus("session", "access", {ubus_rpc_session=require("luci.dispatcher").context.authsession,
+					scope="uci", object=self.config, ["function"]="write"})
+				if not access or not access.access then error("config_forbidden", 0) end
+				if require("luci.http").formvalue("passwall_revision_" .. self.config) ~= T.form_revision(self.config) then
+					error("config_conflict", 0)
+				end
+				local parsed, parse_error = pcall(function() state = default_parse(self, unpack(args)) end)
+				if not parsed then self.uci:revert(self.config); error(parse_error, 0) end
+				-- Save persists only this config under the lock. Apply retains the
+				-- existing guarded service lifecycle; no pending RPC delta can later
+				-- overwrite a cloud transaction through LuCI's global Apply button.
+				if self.save then assert(self.uci:commit(self.config))
+				else self.uci:revert(self.config) end
+				self.config_revision = T.form_revision(self.config)
+			end)
+			if not ok then
+				self.save, self.apply_needed, self.passwall_conflict = false, false, true
+				local posted = require("luci.http").formvalue("passwall_revision_" .. self.config)
+				self.config_revision = type(posted) == "string" and #posted == 64 and posted:match("^%x+$") and posted or ""
+				self.errmessage = (err == "config_busy") and "配置正在更新，请稍后重试。" or "配置已变化或保存失败，请重新加载页面后再保存。"
+				return cbi.FORM_INVALID
+			end
+			return state
 		end
 		function Map.foreach(self, stype, func)
 			self.uci:foreach(self.config, stype, func)

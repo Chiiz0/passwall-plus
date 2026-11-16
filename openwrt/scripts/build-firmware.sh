@@ -78,7 +78,7 @@ copy_built_package() {
 	esac
 }
 
-for command_name in curl find gawk git gzip make nproc qemu-img sed sha256sum sort tar xargs zstd; do
+for command_name in curl find gawk git gzip make nproc qemu-img python3 sed sha256sum sort tar xargs zstd; do
 	require_command "${command_name}"
 done
 
@@ -193,6 +193,8 @@ if grep -Eq '(^| )miniupnpd|fullcone' "${DIST_DIR}/packages.manifest"; then
 	echo 'error: forbidden Kwrt networking package found in manifest' >&2
 	exit 1
 fi
+
+python3 "${SCRIPT_DIR}/release-manifest.py" "${DIST_DIR}"
 
 (
 	cd "${DIST_DIR}"

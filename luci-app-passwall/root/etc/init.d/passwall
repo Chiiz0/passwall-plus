@@ -36,7 +36,9 @@ wait_updates() {
    local nixio = require "nixio"
    local file = nixio.open(os.getenv("PASSWALL_UPDATE_LOCK"), "a")
    if not file then os.exit(2) end
-   os.exit(file:lock("tlock") and 0 or 1)
+   if not file:lock("tlock") then os.exit(1) end
+   local ok = pcall(function() require("luci.passwall.backup_runtime").recover() end)
+   os.exit(ok and 0 or 2)
   '
   status=$?
   [ "$status" != 1 ] && return "$status"
@@ -66,6 +68,7 @@ boot_func() {
  switch_phase boot
  switch_core_restore || { switch_failed; unset_lock; return 1; }
  switch_guard_begin || { switch_failed; unset_lock; return 1; }
+ if ! wait_updates; then switch_failed; unset_lock; return 1; fi
  local delay=$(config_n_get @global_delay[0] start_delay 1)
  case "$delay" in ''|*[!0-9]*) delay=1 ;; esac
  [ "$delay" -le 300 ] || delay=300

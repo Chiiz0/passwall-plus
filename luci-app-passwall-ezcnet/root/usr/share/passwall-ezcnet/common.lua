@@ -36,6 +36,12 @@ function M.bounded(v,n)
  return v:sub(1,i+w-1>n and i-1 or n)
 end
 function M.lock(path)
+ if path == '/var/lock/passwall_sub_rule.lock' then
+  local T=require'luci.passwall.config_transaction'
+  if not T.acquire() then return nil end
+  local closed=false
+  return {close=function() if not closed then closed=true;T.release() end end}
+ end
  local f=M.nixio.open(path,M.nixio.open_flags('rdwr','creat'), '600')
  if not f then return nil end
  if not f:lock('tlock') then f:close(); return nil end
@@ -51,10 +57,29 @@ end
 function M.finish(j,status,message,data)
  j.phase='done'; j.result={id=j.id,status=status,message=message,data=data}; M.save(M.persist..'/pending.json',j)
 end
+-- The service normalizes device bindings and DNS bookkeeping during restart.
+-- Use the guard's effective-config comparison for rollback; keep raw hashes
+-- for command CAS and for validating the saved original bytes.
+function M.config_digest(path)
+ local dir=M.runtime..'/digest-'..M.id(); assert(M.fs.mkdir(dir,'700'))
+ local ok,result=pcall(function()
+  M.write(dir..'/passwall',M.read(path))
+  assert(os.execute('umask 077; lua /usr/libexec/passwall-guard-digest.lua '..M.quote(dir)..' >'..M.quote(dir..'/canonical')..' 2>/dev/null')==0,'invalid_config_digest')
+  local digest=M.hash(dir..'/canonical');assert(#digest==64,'invalid_config_digest');return digest
+ end)
+ for _,name in ipairs({'passwall','passwall.new','canonical'}) do M.fs.remove(dir..'/'..name) end
+ M.fs.rmdir(dir)
+ if not ok then error(result,0) end
+ return result
+end
 function M.rollback(j)
  local lock=M.lock('/var/lock/passwall_sub_rule.lock'); if not lock then return end
  local revision=M.hash(M.config)
- if j.new_revision and revision==j.new_revision and M.hash(M.persist..'/rollback')==j.old_revision then
+ local same_candidate=j.new_revision and revision==j.new_revision
+ if not same_candidate and j.new_digest then
+  local ok,digest=pcall(M.config_digest,M.config);same_candidate=ok and digest==j.new_digest
+ end
+ if same_candidate and M.hash(M.persist..'/rollback')==j.old_revision then
   M.write(M.config,M.read(M.persist..'/rollback')); lock:close();lock=nil;local ok=M.restart()
   M.finish(j,'rolled_back',ok and 'cloud_confirmation_failed_config_restored' or 'config_restored_restart_failed')
  else M.finish(j,'failed',revision==j.old_revision and 'operation_interrupted_before_apply' or 'local_config_changed_rollback_skipped') end

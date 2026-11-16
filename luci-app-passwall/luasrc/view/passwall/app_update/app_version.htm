@@ -1,3 +1,4 @@
+<%+passwall/request%>
 <div id="app_version">
 <%
 local map = self.map
@@ -187,7 +188,7 @@ local com = self.com
 				return;
 			}
 			downloadProgressPending = true;
-			XHR.get(appUpdateUrl, {
+			PasswallRequest.post(appUpdateUrl, {
 				token: tokenStr,
 				task: 'progress',
 				id: downloadId,
@@ -207,7 +208,7 @@ local com = self.com
 
 		function download(part) {
 			var asset = app === appname && part === 2 ? appInfo.i18n : appInfo.data;
-			XHR.get(appUpdateUrl, {
+			PasswallRequest.post(appUpdateUrl, {
 				token: tokenStr, url: asset.browser_download_url,
 				size: (app === appname && part === 1 ? totalSize : asset.size) / 1024,
 				id: downloadId, part: part
@@ -224,7 +225,7 @@ local com = self.com
 					installLuci(btn, appUpdateUrl, downloadId);
 				} else if (json.zip) {
 					btn.value = decompressioningText;
-					XHR.get(appUpdateUrl, {
+					PasswallRequest.post(appUpdateUrl, {
 						token: tokenStr, task: 'extract', file: json.file, subfix: appInfo.type || ''
 					}, function (x, json) {
 						if (!json || json.code) {
@@ -246,14 +247,14 @@ local com = self.com
 		btn.value = movingText;
 
 		// Move file to target dir
-		XHR.get(url, {
+		PasswallRequest.post(url, {
 			token: tokenStr,
 			task: 'move',
 			file: file
 		}, function (x, json) {
 			removePageNotice(app);
-			if (json.code) {
-				onRequestError(btn, json.error);
+			if (!json || json.code) {
+				onRequestError(btn, json && json.error);
 			} else {
 				onUpdateSuccess(btn);
 			}

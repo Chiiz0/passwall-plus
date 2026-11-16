@@ -1,0 +1,32 @@
+local B = dofile('luci-app-passwall/luasrc/passwall/backup.lua')
+local function entry(name, data, kind, link)
+ local function pad(s,n) return s .. string.rep('\0', n-#s) end
+ local h = pad(name,100)..'0000600\0'..'0000000\0'..'0000000\0'..string.format('%011o\0',#data)..'00000000000\0'..'        '..(kind or '0')..pad(link or '',100)..'ustar\00000'..string.rep('\0',247)
+ assert(#h==512)
+ local sum=0;for i=1,#h do sum=sum+h:byte(i) end
+ h=h:sub(1,148)..string.format('%06o\0 ',sum)..h:sub(157)
+ return h..data..string.rep('\0',(512-#data%512)%512)
+end
+local version=entry('passwall-version','26.11.3\n')
+local config=entry('etc/config/passwall',"config global 'global'\n")
+local trailer=string.rep('\0',1024)
+local function parse(s) return B.parse(s,'26.11.3-2') end
+assert(B.selected(parse(version..config..trailer),'client')['etc/config/passwall'])
+local function rejects(data, code)
+ local ok,err=pcall(parse,data);assert(not ok and err==code, tostring(err)..' expected '..code)
+end
+rejects(version..entry('../../etc/shadow','bad')..trailer,'unexpected_archive_path')
+rejects(version..entry('/etc/config/passwall','bad')..trailer,'unexpected_archive_path')
+rejects(version..entry('etc/config/passwall','', '2','/etc/shadow')..trailer,'unsupported_archive_entry')
+rejects(version..entry('etc/config/passwall','', '1','/etc/shadow')..trailer,'unsupported_archive_entry')
+rejects(version..entry('etc/config/passwall','', 'x')..trailer,'unsupported_archive_entry')
+rejects(version..config..config..trailer,'duplicate_archive_entry')
+rejects(entry('passwall-version','26.10.29\n')..config..trailer,'incompatible_backup_version')
+rejects(version..config..entry('passwall-backup-schema','future\n')..trailer,'incompatible_backup_schema')
+rejects(version..config..trailer..'extra','archive_trailing_data')
+rejects(version..config..string.rep('\0',512),'truncated_archive')
+rejects('X'..version:sub(2)..config..trailer,'invalid_tar_checksum')
+rejects(version..trailer,'missing_backup_config')
+rejects(string.rep('a',B.max_expanded+1),'backup_too_large')
+local ok=pcall(B.selected,parse(version..config..trailer),'all');assert(not ok)
+print('PASS backup archive traversal, links, extensions, duplicates, checksum, size, truncation and compatibility')
