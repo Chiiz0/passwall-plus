@@ -83,7 +83,8 @@ IPv6 hosts, Naive scheme names, WireGuard/SOCKS/HTTP imports, capable-core selec
 Clash DNS extraction and the cloud converter's read-only/error contract.
 Generated Xray/Sing-box configs are checked by the installed cores, including
 Hysteria2 port hopping, WebSocket query preservation and WireGuard endpoints.
-Sing-box is built with WireGuard, QUIC and uTLS support.
+Sing-box is built with WireGuard, its required gVisor stack, QUIC and uTLS support.
+Guest Lua tests run in batch mode so assertion failures stop the release checks.
 An independent LAN client also requests new unicast/broadcast DHCP leases,
 renews an existing lease, and loads LuCI by LAN IP during protection, an
 unreachable-node health check, sustained recovery, and verified restoration.

@@ -81,6 +81,8 @@ api.finded_com = function(name) return '/usr/bin/' .. name end
 api.get_singbox_tags = function() return 'with_quic,with_utls' end
 assert(api.get_wireguard_core('sing-box') == 'xray')
 api.get_singbox_tags = function() return 'with_quic,with_wireguard' end
+assert(api.get_wireguard_core('sing-box') == 'xray')
+api.get_singbox_tags = function() return 'with_quic,with_wireguard,with_gvisor' end
 assert(api.get_wireguard_core('sing-box') == 'sing-box')
 assert(api.get_wireguard_core('xray') == 'xray')
 api.finded_com = function(name) if name == 'sing-box' then return '/usr/bin/sing-box' end end

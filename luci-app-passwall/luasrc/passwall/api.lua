@@ -977,7 +977,9 @@ function get_singbox_tags()
 end
 
 function get_wireguard_core(preferred)
-	local singbox = finded_com("sing-box") and get_singbox_tags():find("with_wireguard", 1, true)
+	local tags = get_singbox_tags()
+	-- Userspace WireGuard endpoints also require the gVisor network stack.
+	local singbox = finded_com("sing-box") and tags:find("with_wireguard", 1, true) and tags:find("with_gvisor", 1, true)
 	if preferred == "sing-box" and singbox then return "sing-box" end
 	if finded_com("xray") then return "xray" end
 	if singbox then return "sing-box" end

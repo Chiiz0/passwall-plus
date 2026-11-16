@@ -50,7 +50,7 @@ for _, core in ipairs({xray, singbox}) do
 	local config = generate(core, {protocol='wireguard', address='2001:db8::1', port='51820',
 		wireguard_secret_key=key, wireguard_public_key=key, wireguard_local_address={'10.200.0.2/32'},
 		wireguard_reserved='1,2,3', wireguard_keepAlive='25', wireguard_mtu='1280'},
-		core == xray or api.get_singbox_tags():find('with_wireguard', 1, true))
+		true)
 	if core == xray then
 		assert(config.outbounds[1].settings.peers[1].endpoint == '[2001:db8::1]:51820')
 	else

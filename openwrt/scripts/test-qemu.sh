@@ -151,6 +151,7 @@ test -x /usr/bin/xray
 test -x /usr/bin/sing-box
 xray version | grep -Fq "Xray $3"
 sing-box version | grep -q 'with_wireguard'
+sing-box version | grep -q 'with_gvisor'
 xray version | grep -q 'go1.27.3'
 if [ -e /proc/sys/net/mptcp/enabled ]; then
 	test "$(sysctl -n net.mptcp.enabled)" = 0
@@ -166,7 +167,7 @@ test -f /var/lock/passwall_ready.lock
 
 # Compile every installed Lua source with the firmware's native Lua compiler.
 # lua is installed by LuCI; standalone luac is not part of the firmware.
-lua <<'LUA'
+lua - <<'LUA'
 local command = "find /usr/lib/lua/luci/passwall /usr/lib/lua/luci/model/cbi/passwall /usr/lib/lua/luci/controller/passwall.lua /usr/share/passwall /usr/share/passwall-ezcnet /usr/lib/lua/luci/controller/passwall_ezcnet.lua /usr/lib/lua/luci/model/cbi/passwall_ezcnet.lua /usr/libexec/passwall-guard-digest.lua -name '*.lua'"
 local files = assert(io.popen(command))
 local count = 0
@@ -327,15 +328,15 @@ echo 'PassWall Plus QEMU firmware checks passed'
 EOF
 
 # Exercise the installed writer lock and HTTP endpoints before packet fixtures.
-ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua < "${OPENWRT_DIR}/tests/test-config-transaction.lua"
+ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua - < "${OPENWRT_DIR}/tests/test-config-transaction.lua"
 python3 "${OPENWRT_DIR}/tests/test-config-http.py" --ssh-port "${SSH_PORT}"
 python3 "${OPENWRT_DIR}/tests/test-http-security.py" --ssh-port "${SSH_PORT}"
-ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua < "${OPENWRT_DIR}/tests/test-cloud-rollback.lua"
+ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua - < "${OPENWRT_DIR}/tests/test-cloud-rollback.lua"
 
 # Reference migration tests use an isolated UCI directory in the disposable VM.
-ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua < "${OPENWRT_DIR}/tests/test-ezcnet-catalog.lua"
-ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua < "${OPENWRT_DIR}/tests/test-subscription-import.lua"
-ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua < "${OPENWRT_DIR}/tests/test-upstream-config.lua"
+ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua - < "${OPENWRT_DIR}/tests/test-ezcnet-catalog.lua"
+ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua - < "${OPENWRT_DIR}/tests/test-subscription-import.lua"
+ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua - < "${OPENWRT_DIR}/tests/test-upstream-config.lua"
 python3 "${OPENWRT_DIR}/tests/test-switch-guard.py" "${SSH_PORT}" "${PROBE_PORT}"
 python3 "${OPENWRT_DIR}/tests/test-management-access.py" "${SSH_PORT}" "${PROBE_PORT}" "${COMPRESSED_IMAGE}"
 python3 "${OPENWRT_DIR}/tests/test-openvpn-health.py" "${SSH_PORT}" "${COMPRESSED_IMAGE}"

@@ -6,7 +6,7 @@ PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/O
 
 本轮合入上游截至 [`dc199849`](https://github.com/Openwrt-Passwall/openwrt-passwall/commit/dc199849) 的 17 个提交（PassWall `26.11.11`）：新增 WireGuard、SOCKS/HTTP/HTTPS 分享链接导入导出，修复测速启动端口冲突、Hysteria2 端口跳跃、WebSocket 路径参数和分流集合清理，并改进移动端与主题适配。Clash 节点 DNS 提取作为默认关闭的独立选项提供，继续保留云控转换器的错误报告接口。
 
-专属固件 `25.12.6-r5` 使用 OpenWrt `25.12.6` / Linux `6.12.112`、Xray `26.11.9`、Go `1.27.3` 和 Sing-box `1.14.4`。依赖包固定至 `efc4093b`，Sing-box 启用 WireGuard 支持；导入时会检查核心能力，旧版 Sing-box 缺少 WireGuard 时优先使用可用的 Xray。内核 MPTCP 仍默认禁用。
+专属固件 `25.12.6-r5` 使用 OpenWrt `25.12.6` / Linux `6.12.112`、Xray `26.11.9`、Go `1.27.3` 和 Sing-box `1.14.4`。依赖包固定至 `efc4093b`，Sing-box 启用 WireGuard 及所需的 gVisor 支持；导入时会检查核心能力，旧版 Sing-box 缺少任一功能时优先使用可用的 Xray。内核 MPTCP 仍默认禁用。
 
 > 仓库名称为 `passwall-plus`。为兼容现有 OpenWrt 软件包、LuCI 路径、UCI 配置和升级流程，内部包名继续使用 `luci-app-passwall`，配置仍位于 `/etc/config/passwall`。
 
