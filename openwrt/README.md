@@ -47,7 +47,7 @@ The official SDK already pins every OpenWrt feed to the 25.12.6 release commit;
 the PassWall package feed is pinned separately. The local PassWall Plus checkout
 is linked into the SDK so the firmware always contains the source being built.
 Only the Go build tooling is backported from a separately pinned OpenWrt packages
-commit, with Go 1.27.3 selected for Xray 26.10.31. Target package feeds and the firmware
+commit, with Go 1.27.3 selected for Xray 26.11.9. Target package feeds and the firmware
 kernel remain on the 25.12.6 baseline. Both pins are recorded in `build-info.txt`.
 
 ## Test
@@ -79,7 +79,11 @@ forms, CSRF and read-only permissions, backup roundtrips, rejected UCI input,
 partial-write rollback, interrupted-restore recovery, and cloud rollback after
 runtime normalization while preserving later local changes.
 Installed-parser tests cover subscription URI passwords, explicit/default ports,
-IPv6 hosts, Naive scheme names, and the cloud converter's read-only/error contract.
+IPv6 hosts, Naive scheme names, WireGuard/SOCKS/HTTP imports, capable-core selection, opt-in
+Clash DNS extraction and the cloud converter's read-only/error contract.
+Generated Xray/Sing-box configs are checked by the installed cores, including
+Hysteria2 port hopping, WebSocket query preservation and WireGuard endpoints.
+Sing-box is built with WireGuard, QUIC and uTLS support.
 An independent LAN client also requests new unicast/broadcast DHCP leases,
 renews an existing lease, and loads LuCI by LAN IP during protection, an
 unreachable-node health check, sustained recovery, and verified restoration.

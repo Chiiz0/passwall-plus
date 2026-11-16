@@ -976,6 +976,13 @@ function get_singbox_tags()
 	return tags or ""
 end
 
+function get_wireguard_core(preferred)
+	local singbox = finded_com("sing-box") and get_singbox_tags():find("with_wireguard", 1, true)
+	if preferred == "sing-box" and singbox then return "sing-box" end
+	if finded_com("xray") then return "xray" end
+	if singbox then return "sing-box" end
+end
+
 local function is_file(path)
 	if path and #path > 1 then
 		if fs.stat(path, "type") == "reg" then

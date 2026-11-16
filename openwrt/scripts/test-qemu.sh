@@ -94,7 +94,7 @@ if ! ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 true >/dev/null 2>&1; then
 	exit 1
 fi
 
-ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 /bin/sh -s -- "${EXPECTED_PASSWALL_VERSION}" "${EXPECTED_EZCNET_VERSION}" <<'EOF'
+ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 /bin/sh -s -- "${EXPECTED_PASSWALL_VERSION}" "${EXPECTED_EZCNET_VERSION}" "${XRAY_VERSION}" <<'EOF'
 set -eux
 trap 'status=$?; if [ "$status" -ne 0 ]; then tail -n 100 /tmp/log/passwall.log 2>/dev/null || true; fi; exit "$status"' EXIT
 
@@ -149,7 +149,8 @@ apk info -e sing-box
 test -x /usr/sbin/openvpn
 test -x /usr/bin/xray
 test -x /usr/bin/sing-box
-xray version | grep -q 'Xray 26.10.31'
+xray version | grep -Fq "Xray $3"
+sing-box version | grep -q 'with_wireguard'
 xray version | grep -q 'go1.27.3'
 if [ -e /proc/sys/net/mptcp/enabled ]; then
 	test "$(sysctl -n net.mptcp.enabled)" = 0
@@ -334,6 +335,7 @@ ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua < "${OPENWRT_DIR}/tests/test-cloud-ro
 # Reference migration tests use an isolated UCI directory in the disposable VM.
 ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua < "${OPENWRT_DIR}/tests/test-ezcnet-catalog.lua"
 ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua < "${OPENWRT_DIR}/tests/test-subscription-import.lua"
+ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua < "${OPENWRT_DIR}/tests/test-upstream-config.lua"
 python3 "${OPENWRT_DIR}/tests/test-switch-guard.py" "${SSH_PORT}" "${PROBE_PORT}"
 python3 "${OPENWRT_DIR}/tests/test-management-access.py" "${SSH_PORT}" "${PROBE_PORT}" "${COMPRESSED_IMAGE}"
 python3 "${OPENWRT_DIR}/tests/test-openvpn-health.py" "${SSH_PORT}" "${COMPRESSED_IMAGE}"

@@ -2,11 +2,11 @@
 
 PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/Openwrt-Passwall/openwrt-passwall) 的增强分支，重点解决局域网设备身份绑定、按设备选择出口、明确拒绝 IPv6，以及全局和单设备 OpenVPN 全流量转发。
 
-当前源码版本：`26.11.3-r3`，云控插件：`0.2.0-r3`，EzWrt 主题：`1.0.0-r1`
+当前源码版本：`26.11.11-r1`，云控插件：`0.2.0-r3`，EzWrt 主题：`1.0.0-r1`
 
-本轮审查上游至 `82678e8e`，合入截至 `edf166fb` 的 8 个提交（PassWall `26.11.3`）：修复分享链接的密码解码、主机与端口解析、HAProxy 端口填充，并改进节点选择器和弹窗的主题兼容性。暂缓 `82678e8e` 的 Clash DNS 自动提取，保留当前 DNS 默认行为和云控转换器的错误报告接口；同时修复 Plus 云控导入器对 `naive+https` / `naive+quic` 协议名的识别。
+本轮合入上游截至 [`dc199849`](https://github.com/Openwrt-Passwall/openwrt-passwall/commit/dc199849) 的 17 个提交（PassWall `26.11.11`）：新增 WireGuard、SOCKS/HTTP/HTTPS 分享链接导入导出，修复测速启动端口冲突、Hysteria2 端口跳跃、WebSocket 路径参数和分流集合清理，并改进移动端与主题适配。Clash 节点 DNS 提取作为默认关闭的独立选项提供，继续保留云控转换器的错误报告接口。
 
-专属固件 `25.12.6-r4` 保持 OpenWrt `25.12.6` / Linux `6.12.112`、Xray `26.10.31`、Go `1.27.3` 和 Sing-box `1.14.4` 的构建基线。依赖包上游没有新提交，继续使用原固定版本；内核 MPTCP 仍默认禁用。
+专属固件 `25.12.6-r5` 使用 OpenWrt `25.12.6` / Linux `6.12.112`、Xray `26.11.9`、Go `1.27.3` 和 Sing-box `1.14.4`。依赖包固定至 `efc4093b`，Sing-box 启用 WireGuard 支持；导入时会检查核心能力，旧版 Sing-box 缺少 WireGuard 时优先使用可用的 Xray。内核 MPTCP 仍默认禁用。
 
 > 仓库名称为 `passwall-plus`。为兼容现有 OpenWrt 软件包、LuCI 路径、UCI 配置和升级流程，内部包名继续使用 `luci-app-passwall`，配置仍位于 `/etc/config/passwall`。
 
@@ -22,7 +22,7 @@ PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/O
 | `eth1` | LAN | 桥接到 `br-lan`，`10.0.0.1/24`，提供 DHCP |
 | `eth2`、`eth3` 等 | LAN | 首次启动时自动将其余现有 `ethN` 网口加入 `br-lan`，无需插线 |
 
-`25.12.6-r4` 采用上述新顺序，与历史 `25.12.6-r3` 镜像相反；刷入新镜像前请将上联接到第一张网卡，管理电脑接到第二张及后续网卡。至少需要两张网卡。首次启动的默认配置会设置此网口顺序和 LAN 地址 `10.0.0.1`，升级前请备份自定义网络配置。
+从 `25.12.6-r4` 起采用上述新顺序，与历史 `25.12.6-r3` 镜像相反；刷入新镜像前请将上联接到第一张网卡，管理电脑接到第二张及后续网卡。至少需要两张网卡。首次启动的默认配置会设置此网口顺序和 LAN 地址 `10.0.0.1`，升级前请备份自定义网络配置。
 
 IPv6 会从内核 sysctl、WAN/LAN 接口、RA/DHCPv6 和 PassWall 同时关闭，LAN 防火墙仍保留一条显式 IPv6 `REJECT` 规则。构建和 QEMU 验证方法见 [openwrt/README.md](openwrt/README.md)。固件不内置订阅、`.ovpn`、私钥或默认密码。
 

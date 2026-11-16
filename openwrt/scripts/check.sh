@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-for test in updater switch-lifecycle package-copy release; do
+for test in updater switch-lifecycle package-copy release url-probe; do
     python3 "openwrt/tests/test-${test}.py"
 done
 for test in plus-ui ezcnet backup; do
