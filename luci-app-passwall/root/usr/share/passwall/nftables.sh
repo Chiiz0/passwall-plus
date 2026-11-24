@@ -1383,6 +1383,8 @@ add_firewall_rule() {
 	# Only TCP, UDP Invalid.
 	nft "add rule $NFTABLE_NAME PSW_DIVERT meta l4proto tcp socket transparent 1 mark set ${FWMARK} counter accept"
 
+	nft "add chain $NFTABLE_NAME PSW_NODE_OUTPUT"
+	nft "flush chain $NFTABLE_NAME PSW_NODE_OUTPUT"
 	nft "add chain $NFTABLE_NAME PSW_DNS"
 	nft "flush chain $NFTABLE_NAME PSW_DNS"
 	if [ $(config_n_get @global[0] dns_redirect "1") = "0" ]; then
@@ -1542,6 +1544,8 @@ add_firewall_rule() {
 
 		if [ -n "$NODE" ] && ([ -n "${LOCALHOST_TCP_PROXY_MODE}" ] || [ -n "${LOCALHOST_UDP_PROXY_MODE}" ]); then
 			[ -n "$DNS_REDIRECT_PORT" ] && {
+				nft "add rule $NFTABLE_NAME PSW_NODE_OUTPUT oif lo ip daddr 127.0.0.1 meta l4proto { tcp, udp } th dport 53 counter redirect to :$DNS_REDIRECT_PORT"
+				nft "add rule $NFTABLE_NAME PSW_NODE_OUTPUT oif lo ip6 daddr ::1 meta l4proto { tcp, udp } th dport 53 counter redirect to :$DNS_REDIRECT_PORT"
 				nft "add rule $NFTABLE_NAME nat_output meta l4proto udp oif lo udp dport 53 counter redirect to :$DNS_REDIRECT_PORT comment \"PSW_DNS\""
 				nft "add rule $NFTABLE_NAME nat_output meta l4proto tcp oif lo tcp dport 53 counter redirect to :$DNS_REDIRECT_PORT comment \"PSW_DNS\""
 			}
@@ -1743,7 +1747,7 @@ add_firewall_rule() {
 	fi
 
 	nft "insert rule $NFTABLE_NAME mangle_output meta skgid $DIRECT_GID counter return comment \"PSW_DIRECT\""
-	nft "insert rule $NFTABLE_NAME nat_output meta skgid $DIRECT_GID counter return comment \"PSW_DIRECT\""
+	nft "insert rule $NFTABLE_NAME nat_output meta skgid $DIRECT_GID counter goto PSW_NODE_OUTPUT comment \"PSW_DIRECT\""
 
 	echolog "防火墙规则加载完成！"
 }

@@ -4,7 +4,9 @@
 The third NIC uses QEMU's UDP Ethernet transport. We inject LAN frames and
 inspect the WAN capture; no test traffic is sent outside the emulated network.
 """
+import hashlib
 import socket
+import ssl
 import select
 import struct
 import subprocess
@@ -117,9 +119,10 @@ def ready(node="good_a", result="ready"):
              "test \"$(cat /tmp/passwall_switch/phase)\" = idle\n")
 
 
-upstream = Upstream()
+upstream = Upstream(tls_node="good_a")
 try:
     guest("cp /etc/config/passwall /tmp/guard-original\n"
+          "cp /etc/config/dhcp /tmp/guard-original-dhcp\n"
           "cp /etc/ssl/certs/ca-certificates.crt /tmp/guard-original-ca\n"
           "test -e /sys/class/net/br-lan/brif/eth2\n"
           "/etc/init.d/passwall stop\nrm -rf /etc/passwall/.switch\n")
@@ -168,9 +171,38 @@ rm /tmp/native-lock-ready
           ". /usr/share/passwall/utils.sh\n. /usr/share/passwall/switch_guard.sh\nswitch_guard_begin\n")
     probe(True)
     print("PASS: guard blocks TCP/UDP/DNS/ICMP and established offloaded flow", flush=True)
-    guest(upstream.setup() + "\n/etc/init.d/passwall restart\n")
+    cert_der = ssl.PEM_cert_to_DER_cert(upstream.cert.read_text())
+    guest(upstream.setup() + f"""
+uci set dhcp.@dnsmasq[0].noresolv=1
+uci add_list dhcp.@dnsmasq[0].rebind_domain=node.guard.example.net
+uci commit dhcp
+/etc/init.d/dnsmasq restart
+dnsmasq --conf-file=/dev/null --no-resolv --no-hosts --bind-interfaces \
+    --listen-address=127.0.0.1 --port=10535 --pid-file=/tmp/guard-dns.pid \
+    --host-record=node.guard.example.net,10.77.0.2
+uci set passwall.good_a.address=node.guard.example.net
+uci set passwall.good_a.tls=1
+uci set passwall.good_a.tls_serverName=tls.guard.example.net
+uci set passwall.good_a.tls_pinSHA256={hashlib.sha256(cert_der).hexdigest()}
+uci set passwall.good_a.domain_strategy=AsIs
+uci set passwall.@global[0].dns_shunt=dnsmasq
+uci set passwall.@global[0].direct_dns_mode=udp
+uci set passwall.@global[0].direct_dns=127.0.0.1:10535
+uci commit passwall
+""")
+    wait_for("nslookup -type=A node.guard.example.net 127.0.0.1 2>&1 | grep -q REFUSED\n")
+    guest("/etc/init.d/passwall restart\n")
     ready()
     assert upstream.nodes["good_a"].requests > 0
+    assert "tls.guard.example.net" in upstream.server_names
+    guest("""
+. /usr/share/passwall/utils.sh
+check_resolver() {
+    run_as_direct_gid nslookup -type=A node.guard.example.net "$1" | grep -Fq 'Address: 10.77.0.2'
+}
+check_resolver 127.0.0.1
+if ip -6 addr show dev lo | grep -q 'inet6 ::1/128'; then check_resolver ::1; fi
+""")
     guest("ls -l /etc/passwall/.switch/last-good | grep -q '^-rw-------'\n")
     guest('''
 PASSWALL_TEST_DNS_UID=$(id -u dnsmasq) lua -e '
@@ -179,7 +211,7 @@ PASSWALL_TEST_DNS_UID=$(id -u dnsmasq) lua -e '
  assert(io.open("/tmp/etc/passwall_tmp/dhcp-hosts", "r")):close()
 '
 ''')
-    print("PASS: real SOCKS/TLS connectivity gates removal; private checkpoint", flush=True)
+    print("PASS: domain node bootstraps through PassWall DNS and verifies its TLS name before release", flush=True)
 
     # Failure after installation must preserve the previous live proxy and undo
     # the temporary barrier. Fault is scoped to this caller, not the watchdog.
@@ -325,6 +357,8 @@ except (subprocess.CalledProcessError, AssertionError) as error:
     raise
 finally:
     guest("cp /tmp/guard-original /etc/config/passwall\n"
+          "cp /tmp/guard-original-dhcp /etc/config/dhcp\n/etc/init.d/dnsmasq restart\n"
+          "if test -s /tmp/guard-dns.pid; then kill $(cat /tmp/guard-dns.pid); fi\n"
           "cp /tmp/guard-original-ca /etc/ssl/certs/ca-certificates.crt\n"
           "uci -q delete firewall.@defaults[0].flow_offloading || true\nuci commit firewall\n"
           "/etc/init.d/passwall stop\nrm -rf /etc/passwall/.switch\n"

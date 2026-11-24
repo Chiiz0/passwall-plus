@@ -1277,6 +1277,7 @@ add_firewall_rule() {
 	[ "${USE_DIRECT_LIST}" = "1" ] && $ipt_n -A PSW_OUTPUT $(dst $IPSET_WHITE) -j RETURN
 	$ipt_n -A PSW_OUTPUT -m mark --mark 0xff/0xff -j RETURN
 
+	$ipt_n -N PSW_NODE_OUTPUT
 	$ipt_n -N PSW_DNS
 	if [ $(config_n_get @global[0] dns_redirect "1") = "0" ]; then
 		#Only hijack when dest address is local IP
@@ -1354,6 +1355,7 @@ add_firewall_rule() {
 		$ip6t_n -A PSW_OUTPUT -m mark --mark 0xff/0xff -j RETURN
 	}
 
+	$ip6t_n -N PSW_NODE_OUTPUT
 	$ip6t_n -N PSW_DNS
 	if [ $(config_n_get @global[0] dns_redirect "1") = "0" ]; then
 		#Only hijack when dest address is local IP
@@ -1431,10 +1433,13 @@ add_firewall_rule() {
 
 		if [ -n "$NODE" ] && ([ -n "${LOCALHOST_TCP_PROXY_MODE}" ] || [ -n "${LOCALHOST_UDP_PROXY_MODE}" ]); then
 			[ -n "$DNS_REDIRECT_PORT" ] && {
-				$ipt_n -A OUTPUT $(comment "PSW_DNS") -p udp -o lo --dport 53 -j REDIRECT --to-ports $DNS_REDIRECT_PORT
-				$ip6t_n -A OUTPUT $(comment "PSW_DNS") -p udp -o lo --dport 53 -j REDIRECT --to-ports $DNS_REDIRECT_PORT 2>/dev/null
-				$ipt_n -A OUTPUT $(comment "PSW_DNS") -p tcp -o lo --dport 53 -j REDIRECT --to-ports $DNS_REDIRECT_PORT
-				$ip6t_n -A OUTPUT $(comment "PSW_DNS") -p tcp -o lo --dport 53 -j REDIRECT --to-ports $DNS_REDIRECT_PORT 2>/dev/null
+				local proto
+				for proto in udp tcp; do
+					$ipt_n -A PSW_NODE_OUTPUT -o lo -d 127.0.0.1 -p "$proto" --dport 53 -j REDIRECT --to-ports "$DNS_REDIRECT_PORT"
+					$ip6t_n -A PSW_NODE_OUTPUT -o lo -d ::1 -p "$proto" --dport 53 -j REDIRECT --to-ports "$DNS_REDIRECT_PORT" 2>/dev/null
+					$ipt_n -A OUTPUT $(comment "PSW_DNS") -p "$proto" -o lo --dport 53 -j REDIRECT --to-ports "$DNS_REDIRECT_PORT"
+					$ip6t_n -A OUTPUT $(comment "PSW_DNS") -p "$proto" -o lo --dport 53 -j REDIRECT --to-ports "$DNS_REDIRECT_PORT" 2>/dev/null
+				done
 			}
 		fi
 
@@ -1636,7 +1641,11 @@ add_firewall_rule() {
 	fi
 
 	local direct_ipt
-	for direct_ipt in "$ipt_n" "$ipt_m" "$ip6t_n" "$ip6t_m"; do
+	# A goto ends OUTPUT after the loopback DNS exception, preserving the GID bypass.
+	for direct_ipt in "$ipt_n" "$ip6t_n"; do
+		$direct_ipt -I OUTPUT $(comment "PSW_DIRECT") -m owner --gid-owner $DIRECT_GID -g PSW_NODE_OUTPUT
+	done
+	for direct_ipt in "$ipt_m" "$ip6t_m"; do
 		$direct_ipt -I OUTPUT $(comment "PSW_DIRECT") -m owner --gid-owner $DIRECT_GID -j RETURN
 	done
 
@@ -1651,7 +1660,7 @@ del_firewall_rule() {
 				$ipt -D $chain $index 2>/dev/null
 			done
 		done
-		for chain in "PSW" "PSW_OUTPUT" "PSW_DIVERT" "PSW_DNS" "PSW_RULE" "PSW_DEVICE_GUARD" "PSW_OPENVPN_DNS" "PSW_OPENVPN_DNS_OUT" "PSW_OPENVPN_OUTPUT"; do
+		for chain in "PSW" "PSW_OUTPUT" "PSW_NODE_OUTPUT" "PSW_DIVERT" "PSW_DNS" "PSW_RULE" "PSW_DEVICE_GUARD" "PSW_OPENVPN_DNS" "PSW_OPENVPN_DNS_OUT" "PSW_OPENVPN_OUTPUT"; do
 			$ipt -F $chain 2>/dev/null
 			$ipt -X $chain 2>/dev/null
 		done
@@ -1758,7 +1767,7 @@ gen_include() {
 			echo "\${mangle_output_psw}" | while read line; do
 				\$(${MY_PATH} insert_rule_before "$ipt_m" "OUTPUT" "mwan3" "\${line}")
 			done
-			$ipt_n -I OUTPUT $(comment "PSW_DIRECT") -m owner --gid-owner $DIRECT_GID -j RETURN
+			$ipt_n -I OUTPUT $(comment "PSW_DIRECT") -m owner --gid-owner $DIRECT_GID -g PSW_NODE_OUTPUT
 			$ipt_m -I OUTPUT $(comment "PSW_DIRECT") -m owner --gid-owner $DIRECT_GID -j RETURN
 
 			[ "$accept_icmp" = "1" ] && \$(${MY_PATH} insert_rule_after "$ipt_n" "PREROUTING" "prerouting_rule" "-p icmp -j PSW")
@@ -1783,7 +1792,7 @@ gen_include() {
 			echo "\${mangle_output_psw}" | while read line; do
 				\$(${MY_PATH} insert_rule_before "$ip6t_m" "OUTPUT" "mwan3" "\${line}")
 			done
-			$ip6t_n -I OUTPUT $(comment "PSW_DIRECT") -m owner --gid-owner $DIRECT_GID -j RETURN
+			$ip6t_n -I OUTPUT $(comment "PSW_DIRECT") -m owner --gid-owner $DIRECT_GID -g PSW_NODE_OUTPUT
 			$ip6t_m -I OUTPUT $(comment "PSW_DIRECT") -m owner --gid-owner $DIRECT_GID -j RETURN
 
 			[ "$accept_icmpv6" = "1" ] && $ip6t_n -A PREROUTING -p ipv6-icmp -j PSW

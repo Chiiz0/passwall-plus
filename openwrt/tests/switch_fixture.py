@@ -73,7 +73,7 @@ class TLSHandler(http.server.BaseHTTPRequestHandler):
 
 
 class Upstream:
-    def __init__(self):
+    def __init__(self, tls_node=None):
         self.directory = tempfile.TemporaryDirectory(prefix="passwall-tls-")
         path = Path(self.directory.name)
         self.cert = path / "cert.pem"
@@ -81,17 +81,22 @@ class Upstream:
         subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
                         "-keyout", str(key), "-out", str(self.cert), "-days", "2",
                         "-subj", "/CN=PassWall disposable test endpoint",
-                        "-addext", "subjectAltName=IP:198.18.0.1,IP:10.78.0.2"],
+                        "-addext", "subjectAltName=IP:198.18.0.1,IP:10.78.0.2,DNS:tls.guard.example.net"],
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.http = http.server.ThreadingHTTPServer(("127.0.0.1", 0), TLSHandler)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(self.cert, key)
+        self.server_names = []
+        if tls_node:
+            context.sni_callback = lambda sock, name, ctx: self.server_names.append(name)
         self.http.socket = context.wrap_socket(self.http.socket, server_side=True)
         self.tls_port = self.http.server_port
         self.nodes = {}
         self.servers = [self.http]
         for name in ("good_a", "bad_b", "good_c"):
             server = SocksServer(("127.0.0.1", 0), SocksHandler)
+            if name == tls_node:
+                server.socket = context.wrap_socket(server.socket, server_side=True)
             server.tls_port = self.tls_port
             server.enabled = name != "bad_b"
             server.requests = 0

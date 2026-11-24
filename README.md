@@ -2,7 +2,7 @@
 
 PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/Openwrt-Passwall/openwrt-passwall) 的增强分支，重点解决局域网设备身份绑定、按设备选择出口、明确拒绝 IPv6，以及全局和单设备 OpenVPN 全流量转发。
 
-当前源码版本：`26.11.11-r1`，云控插件：`0.2.0-r3`，EzWrt 主题：`1.0.0-r1`
+当前源码版本：`26.11.11-r2`，云控插件：`0.2.0-r3`，EzWrt 主题：`1.0.0-r1`
 
 本轮合入上游截至 [`dc199849`](https://github.com/Openwrt-Passwall/openwrt-passwall/commit/dc199849) 的 17 个提交（PassWall `26.11.11`）：新增 WireGuard、SOCKS/HTTP/HTTPS 分享链接导入导出，修复测速启动端口冲突、Hysteria2 端口跳跃、WebSocket 路径参数和分流集合清理，并改进移动端与主题适配。Clash 节点 DNS 提取作为默认关闭的独立选项提供，继续保留云控转换器的错误报告接口。
 
