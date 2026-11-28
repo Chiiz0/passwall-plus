@@ -93,6 +93,8 @@ function M.collect(env)
 		return {id = id or "", name = id or "", type = "", missing = true}
 	end
 	out.global.node = node_ref(global.node)
+	out.global.backup_node = node_ref(global.backup_node)
+	out.global.failover_role = cache.FAILOVER_ROLE or ""
 	-- Keep observed runtime selection distinct from the saved configuration.
 	out.global.runtime_node = node_ref(cache.ACL_GLOBAL_node)
 	out.global.runtime_openvpn = cache.GLOBAL_OPENVPN == "1"
@@ -116,7 +118,8 @@ function M.collect(env)
 		local id = rule[".name"]
 		if not safe_id(id) then return end
 		local inherited = rule.use_global_config == "1"
-		local node = node_ref(inherited and global.node or rule.node)
+		local global_exit = out.global.failover_role == "backup" and out.global.runtime_node.id or global.node
+		local node = node_ref(inherited and global_exit or rule.node)
 		local mode = rule.mode == "1" and (inherited and "global" or "node") or "direct"
 		local bound = rule.bind_enable == "1"
 		local registered = exists(root .. "/acl/" .. id .. "/source_list")

@@ -336,7 +336,9 @@ ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua - < "${OPENWRT_DIR}/tests/test-cloud-
 # Reference migration tests use an isolated UCI directory in the disposable VM.
 ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua - < "${OPENWRT_DIR}/tests/test-ezcnet-catalog.lua"
 ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua - < "${OPENWRT_DIR}/tests/test-subscription-import.lua"
+ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua - < "${OPENWRT_DIR}/tests/test-subscription-remap.lua"
 ssh "${SSH_OPTIONS[@]}" root@127.0.0.1 lua - < "${OPENWRT_DIR}/tests/test-upstream-config.lua"
 python3 "${OPENWRT_DIR}/tests/test-switch-guard.py" "${SSH_PORT}" "${PROBE_PORT}"
 python3 "${OPENWRT_DIR}/tests/test-management-access.py" "${SSH_PORT}" "${PROBE_PORT}" "${COMPRESSED_IMAGE}"
 python3 "${OPENWRT_DIR}/tests/test-openvpn-health.py" "${SSH_PORT}" "${COMPRESSED_IMAGE}"
+python3 "${OPENWRT_DIR}/tests/test-global-failover.py" "${SSH_PORT}"

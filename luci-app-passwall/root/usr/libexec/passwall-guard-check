@@ -5,8 +5,12 @@
 if [ "$1" = runtime ]; then
 	case "$(switch_read result)" in ready|rolled_back|cancelled) ;; *) exit 0 ;; esac
 	switch_has_proxy || exit 0
-	switch_guard_ready
+	switch_guard_ready && ! switch_failover_due
 	exit $?
 fi
+case "$1" in
+	active) switch_probe_global; exit $? ;;
+	primary) switch_probe_primary; exit $? ;;
+esac
 SWITCH_REQUEST="$1"
 switch_wait_ready "${2:-30}"

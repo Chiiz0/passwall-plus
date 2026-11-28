@@ -868,7 +868,8 @@ start_global() {
 
 start_global_openvpn() {
 	[ "$GLOBAL_OPENVPN" = "1" ] || return 0
-	local node="$NODE" openvpn_dir="${TMP_PATH}/openvpn/nodes/${NODE}"
+	local node="${1:-$NODE}" probe_only="$2"
+	local openvpn_dir="${TMP_PATH}/openvpn/nodes/${node}"
 	local preproxy_node preproxy_port preproxy_type preproxy_host openvpn_bin
 	local allow_lan=$(config_n_get @global[0] openvpn_global_allow_lan 1)
 	local enable_log=$(config_n_get @global[0] log_node 0)
@@ -894,7 +895,7 @@ start_global_openvpn() {
 	fi
 
 	mkdir -p "$GLOBAL_ACL_PATH"
-	if $APP_PATH/openvpn.sh global "$node" "$CLIENT_PROXY" "$LOCALHOST_PROXY" "$allow_lan" "$preproxy_port"; then
+	if $APP_PATH/openvpn.sh global "$node" "$CLIENT_PROXY" "$LOCALHOST_PROXY" "$allow_lan" "$preproxy_port" "$probe_only"; then
 		if [ -n "$preproxy_node" ]; then
 			local preproxy_log="/dev/null"
 			[ "$enable_log" = "1" ] && preproxy_log="${GLOBAL_ACL_PATH}/openvpn_preproxy.log"
@@ -910,10 +911,41 @@ start_global_openvpn() {
 			[ "$enable_log" = "1" ] && openvpn_log="${GLOBAL_ACL_PATH}/openvpn.log"
 			rm -f "$openvpn_dir/openvpn.pid"
 			ln_run "$openvpn_bin" "openvpn_${node}" "$openvpn_log" --config "$openvpn_dir/client.conf"
-			echolog "  - 全局 OpenVPN 节点[$node]已启动，LAN 与路由器本机策略按全局开关接管。"
+			echolog "  - OpenVPN 节点[$node]已启动。"
 		fi
 	else
 		echolog "  - 全局 OpenVPN 节点[$node]配置生成失败；所选流量保持阻断，不会回落 WAN。"
+	fi
+}
+
+start_primary_probe() {
+	eval_cache_var
+	[ "$FAILOVER_ROLE" = backup ] || return 1
+	local primary="$FAILOVER_PRIMARY_NODE" port dir file has_worker=0
+	case "$primary" in ''|*[!A-Za-z0-9_+-]*) return 1 ;; esac
+	dir="$TMP_PATH/openvpn/nodes/$primary"
+	# Reuse an explicitly pinned device tunnel without taking ownership of it.
+	if [ "$GLOBAL_OPENVPN" = 1 ] && [ -d "$dir" ] && [ ! -f "$dir/probe_only" ]; then
+		[ -s "$dir/client.conf" ]
+		return $?
+	fi
+	# The switch controller owns these optional workers under its service lock.
+	# Their health must never block traffic through the verified backup.
+	local TMP_SCRIPT_FUNC_PATH="$TMP_PATH/failover/workers" PROBE_WORKER=1
+	umask 077
+	mkdir -p "$TMP_SCRIPT_FUNC_PATH" || return 1
+	for file in "$TMP_SCRIPT_FUNC_PATH"/*; do
+		[ -f "$file" ] || continue
+		has_worker=1
+		ensure_recorded_process "$file" || return 1
+	done
+	[ "$has_worker" = 0 ] || return 0
+	if [ "$GLOBAL_OPENVPN" = 1 ]; then
+		CLIENT_PROXY=0 LOCALHOST_PROXY=0 start_global_openvpn "$primary" probe
+	else
+		port=$(get_new_port 48200 tcp,udp) || return 1
+		run_socks flag=failover_primary node="$primary" bind=127.0.0.1 socks_port="$port" config_file=failover/primary.json
+		set_cache_var FAILOVER_PRIMARY_SOCKS "127.0.0.1:$port"
 	fi
 }
 
@@ -1865,7 +1897,7 @@ start() {
 	rm -f "$TMP_PATH/firewall_ready" "$TMP_PATH/firewall_error" "$TMP_PATH/start_complete"
 	sync_device_policies
 	set_cache_var "LOCAL_DNS" "$LOCAL_DNS"
-	get_config
+	get_config "$1" || return 1
 	GEO_DIR=$(config_n_get @global_rules[0] v2ray_location_asset "/usr/share/v2ray/")
 	export XRAY_LOCATION_ASSET="$TMP_PATH2/geodata"
 	mkdir -p "$XRAY_LOCATION_ASSET" 2>/dev/null
@@ -1918,6 +1950,12 @@ start() {
 		}
 	fi
 
+	if [ -n "$BACKUP_NODE" ]; then
+		set_cache_var FAILOVER_PRIMARY_NODE "$PRIMARY_NODE"
+		set_cache_var FAILOVER_ROLE "${1:-primary}"
+		echo '0 0' > "$TMP_PATH/failover_counts"
+		echo 0 > "$TMP_PATH/failover_next"
+	fi
 	touch "$TMP_PATH/start_complete"
 	return 0
 }
@@ -1994,6 +2032,13 @@ get_config() {
 	ENABLED=$(config_n_get @global[0] enabled 0)
 	SOCKS_ENABLED=$(config_n_get @global[0] socks_enabled 0)
 	NODE=$(config_n_get @global[0] node)
+	PRIMARY_NODE="$NODE"
+	BACKUP_NODE=""
+	[ "$ENABLED" != 1 ] || BACKUP_NODE=$(global_backup_node "$PRIMARY_NODE")
+	if [ "$1" = backup ]; then
+		[ -n "$BACKUP_NODE" ] || return 1
+		NODE="$BACKUP_NODE"
+	fi
 
 	[ "$ENABLED" = 1 ] && {
 		if [ -n "$NODE" ] && ([ "$(config_get_type $NODE)" = "nodes" ] || [ "$(config_get_type $NODE)" = "socks" ]); then
@@ -2103,6 +2148,7 @@ get_config() {
 		fi
 		set_cache_var "LOCAL_DNS" "$LOCAL_DNS"
 	fi
+	return 0
 }
 
 get_local_dns() {
@@ -2123,6 +2169,10 @@ get_local_dns
 arg1=$1
 shift
 case $arg1 in
+primary_probe)
+	[ "$PASSWALL_TRANSITION_MANAGED" = 1 ] || exit 1
+	start_primary_probe
+	;;
 run_socks)
 	run_socks "$@"
 	;;

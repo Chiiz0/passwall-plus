@@ -254,7 +254,7 @@ function get_redir_log()
 
 	local name = "global"
 	if id and id ~= "default" then
-		local global_node = uci_get("@global[0]", "node") or "nil"
+		local global_node = api.get_cache_var("ACL_GLOBAL_node") or uci_get("@global[0]", "node") or "nil"
 		local acl_node = uci_get(id, "node") or "nil"
 		local use_global_config = uci_get(id, "use_global_config") == "1"
 		local global_enabled = uci_get("@global[0]", "enabled") == "1"
@@ -294,7 +294,7 @@ function get_chinadns_log()
 	local flag = identifier(http.formvalue("flag")); if not flag then return end
 	local path = api.TMP_PATH .. "/acl/" .. flag .. "/chinadns_ng.log"
 	if flag ~= "default" then
-		local global_node = uci_get("@global[0]", "node") or "nil"
+		local global_node = api.get_cache_var("ACL_GLOBAL_node") or uci_get("@global[0]", "node") or "nil"
 		local acl_node = uci_get(flag, "node") or "nil"
 		local use_global_config = uci_get(flag, "use_global_config") == "1"
 		if (use_global_config or acl_node == global_node) and uci_get("@global[0]", "enabled") == "1" then
@@ -604,6 +604,7 @@ function clear_all_nodes()
 	uci_set('@global[0]', "socks_enabled", "0")
 	uci_set('@global_haproxy[0]', "balancing_enable", "0")
 	uci_del('@global[0]', "node")
+	uci_del('@global[0]', "backup_node")
 	uci_foreach("socks", function(t)
 		uci_del(t[".name"])
 		uci_set(t[".name"], "autoswitch_backup_node", {})
@@ -635,6 +636,9 @@ function delete_select_nodes()
 		ids_t[#ids_t + 1] = w
 		if (uci_get("@global[0]", "node") or "") == w then
 			uci_del('@global[0]', "node")
+		end
+		if uci_get("@global[0]", "backup_node") == w then
+			uci_del('@global[0]', "backup_node")
 		end
 		uci_foreach("socks", function(t)
 			local changed = false

@@ -2,9 +2,9 @@
 
 PassWall Plus 是基于 [Openwrt-Passwall/openwrt-passwall](https://github.com/Openwrt-Passwall/openwrt-passwall) 的增强分支，重点解决局域网设备身份绑定、按设备选择出口、明确拒绝 IPv6，以及全局和单设备 OpenVPN 全流量转发。
 
-当前源码版本：`26.11.11-r2`，云控插件：`0.2.0-r3`，EzWrt 主题：`1.0.0-r1`
+当前源码版本：`26.11.11-r4`，云控插件：`0.2.0-r4`，EzWrt 主题：`1.0.0-r1`
 
-本轮合入上游截至 [`dc199849`](https://github.com/Openwrt-Passwall/openwrt-passwall/commit/dc199849) 的 17 个提交（PassWall `26.11.11`）：新增 WireGuard、SOCKS/HTTP/HTTPS 分享链接导入导出，修复测速启动端口冲突、Hysteria2 端口跳跃、WebSocket 路径参数和分流集合清理，并改进移动端与主题适配。Clash 节点 DNS 提取作为默认关闭的独立选项提供，继续保留云控转换器的错误报告接口。
+前一轮合入上游截至 [`dc199849`](https://github.com/Openwrt-Passwall/openwrt-passwall/commit/dc199849) 的 17 个提交（PassWall `26.11.11`）：新增 WireGuard、SOCKS/HTTP/HTTPS 分享链接导入导出，修复测速启动端口冲突、Hysteria2 端口跳跃、WebSocket 路径参数和分流集合清理，并改进移动端与主题适配。Clash 节点 DNS 提取作为默认关闭的独立选项提供，继续保留云控转换器的错误报告接口。
 
 专属固件 `25.12.6-r5` 使用 OpenWrt `25.12.6` / Linux `6.12.112`、Xray `26.11.9`、Go `1.27.3` 和 Sing-box `1.14.4`。依赖包固定至 `efc4093b`，Sing-box 启用 WireGuard 及所需的 gVisor 支持；导入时会检查核心能力，旧版 Sing-box 缺少任一功能时优先使用可用的 Xray。内核 MPTCP 仍默认禁用。
 
@@ -118,6 +118,12 @@ DHCP 请求与服务端应答均单独放行，覆盖新设备取址、广播应
 nftables/firewall4 使用标准 fw4 流量卸载表；遇到其他自定义卸载表会取消切换。fw3 开启流量卸载时需要安装 `conntrack`。专属固件在 nftables/IPv4 下进行真实包测试，并默认关闭 IPv6；fw3 和其他硬件卸载平台仍需在对应设备验证。
 
 保护不会改变正常运行时的分流或直连策略，也不替代 OpenVPN 已有的持续断线防回落。
+
+### 为全局出口设置主备节点
+
+在「全局出口 → 主要」开启主开关，把首选节点设为「代理节点」，再选择「备用出口」并保存应用。两端可以是两个普通代理节点，也可以是两个 OpenVPN 节点。备用出口默认关闭。
+
+运行中约每 30 秒通过当前出口发起 HTTPS 检查，连续三次失败后尝试备用节点。启动时主节点未通过验证，也会尝试备用节点。使用备用出口期间，Plus 通过独立的本地代理或探测隧道检查主节点，连续三次成功后回切。OpenVPN 主备共用账号时，服务端需要允许两条隧道同时在线。切换沿用网络保护设置，已有连接可能需要重连。「总览面板 → 全局运行记录」显示实际出口，跟随全局的设备会一起切换。
 
 ## OpenVPN 集成
 

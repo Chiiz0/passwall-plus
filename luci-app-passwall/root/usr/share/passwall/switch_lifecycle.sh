@@ -65,8 +65,9 @@ switch_digest() {
 switch_capture() {
 	local tmp digest
 	tmp=$(mktemp "$SWITCH_DIR/.candidate.XXXXXX") || return 1
-	switch_export > "$tmp" && mv -f "$tmp" "$SWITCH_DIR/candidate" || { rm -f "$tmp"; return 1; }
-	digest=$(switch_digest_file "$SWITCH_DIR/candidate") || return 1
+	switch_export > "$tmp" && digest=$(switch_digest_file "$tmp") &&
+		{ [ -z "$1" ] || [ "$digest" = "$1" ]; } &&
+		mv -f "$tmp" "$SWITCH_DIR/candidate" || { rm -f "$tmp"; return 1; }
 	switch_write desired "$digest"
 }
 
@@ -173,21 +174,53 @@ switch_probe() {
 	return 1
 }
 
+switch_probe_vpn() {
+	local dir="$1" device table
+	device=$(cat "$dir/dev") && table=$(cat "$dir/table") || return 1
+	case "$device" in pswov[0-9]*) ;; *) return 1 ;; esac
+	ip -4 route show table "$table" | grep -q "^default dev $device .*metric 10" || return 1
+	switch_probe '' "$device"
+}
+
+switch_probe_global() {
+	local endpoint
+	if [ "$(get_cache_var GLOBAL_OPENVPN)" = 1 ]; then
+		local dir
+		for dir in "$TMP_PATH"/openvpn/nodes/*; do
+			[ -f "$dir/global" ] || continue
+			switch_probe_vpn "$dir"
+			return $?
+		done
+		return 1
+	fi
+	endpoint=$(get_cache_var GLOBAL_SOCKS_server)
+	[ -n "$endpoint" ] && switch_probe "$endpoint"
+}
+
+switch_probe_primary() {
+	local primary endpoint
+	"$APP_PATH/app.sh" primary_probe || return 1
+	if [ "$(get_cache_var GLOBAL_OPENVPN)" = 1 ]; then
+		primary=$(get_cache_var FAILOVER_PRIMARY_NODE)
+		case "$primary" in ''|*[!A-Za-z0-9_+-]*) return 1 ;; esac
+		switch_probe_vpn "$TMP_PATH/openvpn/nodes/$primary"
+	else
+		endpoint=$(get_cache_var FAILOVER_PRIMARY_SOCKS)
+		[ -n "$endpoint" ] && switch_probe "$endpoint"
+	fi
+}
+
 switch_connected() {
-	local endpoint key dir device
-	if [ "$(get_cache_var ENABLED_DEFAULT_ACL)" = 1 ]; then
-		endpoint=$(get_cache_var GLOBAL_SOCKS_server)
-		[ -n "$endpoint" ] && switch_probe "$endpoint" || return 1
+	local key dir
+	if [ "$(get_cache_var ENABLED_DEFAULT_ACL)" = 1 ] || [ "$(get_cache_var GLOBAL_OPENVPN)" = 1 ]; then
+		switch_probe_global || return 1
 	fi
 	for key in $(sed -n 's/^\(acl_node_[A-Za-z0-9_]*_socks_port\)=.*/\1/p' "$TMP_PATH/var" 2>/dev/null); do
 		switch_probe "127.0.0.1:$(get_cache_var "$key")" || return 1
 	done
 	for dir in "$TMP_PATH"/openvpn/nodes/*; do
-		[ -f "$dir/client.conf" ] || continue
-		device=$(cat "$dir/dev")
-		case "$device" in pswov[0-9]*) ;; *) return 1 ;; esac
-		ip -4 route show table "$(cat "$dir/table")" | grep -q "^default dev $device .*metric 10" || return 1
-		switch_probe '' "$device" || return 1
+		[ -f "$dir/client.conf" ] && [ ! -f "$dir/global" ] && [ ! -f "$dir/probe_only" ] || continue
+		switch_probe_vpn "$dir" || return 1
 	done
 	return 0
 }
@@ -232,6 +265,10 @@ switch_checkpoint() {
 	switch_has_proxy || return 0
 	umask 077
 	mkdir -p "$SWITCH_SAVE" && chmod 700 "$SWITCH_SAVE" || return 1
+	if cmp -s "$SWITCH_DIR/candidate" "$SWITCH_SAVE/last-good"; then
+		switch_write running "$(switch_read desired)"
+		return $?
+	fi
 	tmp=$(mktemp "$SWITCH_SAVE/.good.XXXXXX") || return 1
 	cp "$SWITCH_DIR/candidate" "$tmp" && mv -f "$tmp" "$SWITCH_SAVE/last-good" || return 1
 	digest=$(switch_digest_file "$SWITCH_SAVE/last-good") || return 1
@@ -292,10 +329,25 @@ switch_attempt() {
 	rm -f "$SWITCH_DIR/running"
 	switch_exec 20 "$APP_FILE" stop || return 1
 	switch_current || return 1
-	switch_exec 60 "$APP_FILE" start || return 1
+	switch_exec 60 "$APP_FILE" start "${4:-primary}" || return 2
 	switch_current || return 1
-	switch_exec 35 /usr/libexec/passwall-guard-check "$SWITCH_REQUEST" 30 || return 1
-	switch_finish "$1" "$2"
+	switch_exec 35 /usr/libexec/passwall-guard-check "$SWITCH_REQUEST" 30 || return 2
+	switch_finish "$1" "$2" || return 1
+}
+
+switch_attempt_pair() {
+	local role="${4:-primary}" alternate status
+	switch_attempt "$1" "$2" "$3" "$role" && return 0
+	status=$?
+	# Only startup or health-check failures warrant trying another exit.
+	[ "$status" = 2 ] && switch_current || return 1
+	[ "$(config_n_get '@global[0]' enabled 0)" = 1 ] &&
+		global_backup_node "$(config_n_get '@global[0]' node)" >/dev/null || return 1
+	[ "$(switch_digest)" = "$(switch_read desired)" ] || return 1
+	alternate=backup
+	[ "$role" != backup ] || alternate=primary
+	echolog "主备切换：当前出口未通过验证，尝试另一节点。"
+	switch_attempt "$1" "$2" '' "$alternate"
 }
 
 switch_failed() {
@@ -314,9 +366,9 @@ switch_failed() {
 }
 
 switch_run() {
-	local action="$1" old_ok=0
+	local action="$1" role="${2:-primary}" expected="$3" old_ok=0
 	switch_current || return 0
-	switch_capture || return 1
+	switch_capture "$expected" || return 1
 	if ! switch_guard_needed && [ "$(config_n_get @global[0] enabled 0)" != 1 ] &&
 		[ "$(config_n_get @global[0] acl_enable 0)" != 1 ]; then
 		switch_core_restore || return 1
@@ -345,12 +397,18 @@ switch_run() {
 		switch_failed
 		return 1
 	fi
-	if switch_attempt "$action" '' armed; then return 0; fi
+	if switch_attempt_pair "$action" '' armed "$role"; then return 0; fi
 	switch_current || return 1
 	switch_core_restore || { switch_failed; return 1; }
+	# A runtime failover has already tried both exits of the verified config.
+	# Restoring identical settings would repeat the outage and rewrite flash.
+	if [ -n "$expected" ] && cmp -s "$SWITCH_DIR/candidate" "$SWITCH_SAVE/last-good"; then
+		switch_failed
+		return 1
+	fi
 	if switch_restore_config; then
 		echolog "新配置未验证通过，正在回退最近一次验证成功的配置。"
-		if switch_attempt '' rolled_back; then return 1; fi
+		if switch_attempt_pair '' rolled_back; then return 1; fi
 	fi
 	switch_failed
 }
@@ -365,6 +423,39 @@ switch_stop() {
 	switch_settled stopped
 }
 
+switch_failover_due() {
+	local next
+	[ -f "$TMP_PATH/failover_next" ] && read -r next < "$TMP_PATH/failover_next" || return 1
+	[ "$(switch_now)" -ge "$next" ]
+}
+
+switch_failover_tick() {
+	local failures=0 recoveries=0 role=backup digest
+	switch_failover_due || return 0
+	echo $(( $(switch_now) + 30 )) > "$TMP_PATH/failover_next"
+	read -r failures recoveries < "$TMP_PATH/failover_counts" 2>/dev/null || { failures=0; recoveries=0; }
+	if switch_exec 20 /usr/libexec/passwall-guard-check active; then failures=0; else failures=$((failures + 1)); fi
+	if [ "$(get_cache_var FAILOVER_ROLE)" = backup ]; then
+		role=primary
+		if switch_current && switch_exec 20 /usr/libexec/passwall-guard-check primary; then
+			recoveries=$((recoveries + 1))
+		else
+			recoveries=0
+		fi
+	fi
+	switch_current || return 1
+	echo "$failures $recoveries" > "$TMP_PATH/failover_counts"
+	[ "$failures" -ge 3 ] || [ "$recoveries" -ge 3 ] || return 0
+	digest=$(switch_read running)
+	[ -n "$digest" ] && wait_updates && switch_current || return 0
+	if [ "$role" = backup ]; then
+		echolog "主节点连续三次检测失败，尝试切换到备用节点。"
+	else
+		echolog "主节点恢复或备用节点连续检测失败，尝试回切主节点。"
+	fi
+	switch_run '' "$role" "$digest"
+}
+
 switch_recover() {
 	local phase=$(switch_read phase) now=$(switch_now) deadline=$(switch_read retry_at)
 	case "$SWITCH_REQUEST" in *' stop') switch_stop; return ;; esac
@@ -375,6 +466,8 @@ switch_recover() {
 			[ "$(switch_digest)" = "$(switch_read running)" ] || return 0
 			switch_guard_ready && return 0
 			echolog "检测到代理进程或监听端口失效，启用保护并恢复服务。"
+			switch_run '' "$(get_cache_var FAILOVER_ROLE)"
+			return
 		fi
 		switch_run
 		return

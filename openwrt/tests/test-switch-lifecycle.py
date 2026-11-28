@@ -22,6 +22,7 @@ printf 'good\n' > "$SWITCH_SAVE/last-good"
 switch_export() { echo candidate; }
 switch_digest_file() { echo digest; }
 switch_digest() { echo digest; }
+config_n_get() { echo "${3:-}"; }
 echolog() { :; }
 switch_guard_needed() { return 0; }
 switch_supervisor() { return 0; }
@@ -69,6 +70,62 @@ switch_exec() {
             assert result_file.read_text().strip() == result
         else:
             assert not result_file.exists(), 'Superseded work wrote a terminal status'
+
+    process = subprocess.run(['/bin/sh'], input=setup + '''
+TMP_PATH="$TEST_DIR/runtime"
+mkdir -p "$TMP_PATH"
+switch_now() { echo 100; }
+get_cache_var() { [ "$1" != FAILOVER_ROLE ] || echo "$role_under_test"; }
+wait_updates() { return "${writer_busy:-0}"; }
+switch_exec() {
+ case "$3" in active) return "$active_status" ;; primary) return "$primary_status" ;; esac
+ return 1
+}
+switch_run() { printf '%s %s\n' "$2" "$3" >> "$TEST_DIR/decisions"; }
+sample() {
+ echo 100 > "$TMP_PATH/failover_next"
+ switch_failover_tick || exit 1
+}
+echo '0 0' > "$TMP_PATH/failover_counts"
+rm -f "$TEST_DIR/decisions"
+role_under_test=primary
+active_status=1; sample; sample
+active_status=0; sample
+[ "$(cat "$TMP_PATH/failover_counts")" = '0 0' ] || exit 1
+active_status=1; sample; sample
+[ ! -f "$TEST_DIR/decisions" ] || exit 1
+writer_busy=1; sample
+[ ! -f "$TEST_DIR/decisions" ] || exit 1
+writer_busy=0; sample
+[ "$(cat "$TEST_DIR/decisions")" = 'backup digest' ] || exit 1
+role_under_test=backup; active_status=0; primary_status=0
+sample; sample; primary_status=1; sample
+[ "$(cat "$TMP_PATH/failover_counts")" = '0 0' ] || exit 1
+primary_status=0; sample; sample
+[ "$(wc -l < "$TEST_DIR/decisions")" -eq 1 ] || exit 1
+sample
+[ "$(tail -n 1 "$TEST_DIR/decisions")" = 'primary digest' ] || exit 1
+rm -f "$TMP_PATH/failover_next"
+! switch_failover_due
+''', text=True, capture_output=True, env=env)
+    assert process.returncode == 0, (process.stdout, process.stderr)
+
+    process = subprocess.run(['/bin/sh'], input=setup + '''
+config_n_get() { case "$2" in enabled) echo 1 ;; node) echo main ;; esac; }
+global_backup_node() { echo standby; }
+switch_exec() {
+ if [ "$2" = /fake/app ] && [ "$3" = start ]; then echo "try $4"; return 1; fi
+ return 0
+}
+switch_restore_config() { return 1; }
+switch_run && exit 1
+[ "$(switch_read result)" = blocked ] && [ "$(switch_read phase)" = failed ] || exit 1
+switch_write desired current
+! switch_capture stale && [ "$(switch_read desired)" = current ]
+''', text=True, capture_output=True, env=env)
+    assert process.returncode == 0, (process.stdout, process.stderr)
+    assert [line for line in process.stdout.splitlines() if line.startswith('try ')] == ['try primary', 'try backup']
+    assert 'clear' not in process.stdout.splitlines(), 'Both exits failed but the guard was removed'
 
     process = subprocess.run(['/bin/sh'], input=setup + '''
 get_process_start_time() { [ "$1" = "$$" ] && echo 123; }

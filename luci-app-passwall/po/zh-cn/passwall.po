@@ -2690,3 +2690,15 @@ msgstr "使用订阅中受支持的 proxy-server-nameserver 解析节点域名�
 
 msgid "No installed core supports WireGuard."
 msgstr "已安装的核心均不支持 WireGuard。"
+
+msgid "Backup exit"
+msgstr "备用出口"
+
+msgid "Select a backup to enable automatic switching. Pair two ordinary proxy nodes or two OpenVPN nodes. Three failed HTTPS checks switch to the backup. Three successful primary checks switch back."
+msgstr "选择备用出口后启用自动切换。主备可选两个普通代理节点或两个 OpenVPN 节点。HTTPS 检测连续三次失败时切换到备用节点，主节点连续三次检测成功后自动回切。"
+
+msgid "Choose two different proxy nodes or two different OpenVPN nodes."
+msgstr "请选择两个不同的普通代理节点，或两个不同的 OpenVPN 节点。"
+
+msgid "Using backup exit"
+msgstr "正在使用备用出口"

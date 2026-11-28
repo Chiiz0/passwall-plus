@@ -6,6 +6,10 @@ local singbox = require 'luci.passwall.util_sing-box'
 local saved_get = api.uci_get_c
 local fixture
 api.uci_get_c = function(section, option)
+	if section == 'member' or section == 'member_long' then
+		return {['.type']='nodes', ['.name']=section, type=fixture.type, remarks=section, protocol='socks',
+			address='127.0.0.1', port=section == 'member' and '11080' or '11081'}
+	end
 	if section == 'qa_upstream' then
 		local copy = api.jsonc.parse(api.jsonc.stringify(fixture))
 		return option and copy[option] or copy
@@ -45,6 +49,43 @@ for _, interval in ipairs({'1', '4-8', 'invalid'}) do
 	assert(not stream.hysteriaSettings.udpHop)
 end
 
+local raw = generate(xray, {protocol='vless', address='192.0.2.1', port='443', uuid=uuid,
+	tls='1', tls_serverName='up.example', transport='raw', tcp_guise='http', tcp_guise_http_host='single.example', tcp_guise_http_path='/old'}, true)
+local request = raw.outbounds[1].streamSettings.rawSettings.header.request
+assert(request.path[1] == '/old' and request.headers.Host[1] == 'single.example')
+for _, options in ipairs({{}, {domainStrategy='UseIPv6', mark=42}}) do
+	local extra = {downloadSettings={address='down.example', port=443, network='xhttp', sockopt=options}}
+	local config = generate(xray, {protocol='vless', address='UP.example', port='443', uuid=uuid,
+		tls='1', tls_serverName='up.example', transport='xhttp', xhttp_mode='stream-up', download_address='DOWN.example',
+		domain_resolver='udp', domain_resolver_dns='192.0.2.53', domain_strategy='UseIPv4',
+		xhttp_extra=api.base64Encode(api.jsonc.stringify(extra))}, true)
+	local sockopt = config.outbounds[1].streamSettings.xhttpSettings.extra.downloadSettings.sockopt
+	assert(sockopt.domainStrategy == (options.domainStrategy or 'UseIPv4') and sockopt.mark == (options.mark or 255))
+	local found = {}
+	for _, server in ipairs(config.dns.servers) do
+		if type(server) == 'table' and server.address == '192.0.2.53' then
+			for _, domain in ipairs(server.domains) do found[domain] = true end
+		end
+	end
+	assert(found['full:up.example'] and found['full:down.example'])
+end
+
+for _, core in ipairs({xray, singbox}) do
+	local group = core == xray and {protocol='_balancing'} or {protocol='_urltest'}
+	local field = core == xray and 'balancing_node' or 'urltest_node'
+	group[field] = {'member_long', 'member', 'member_long'}
+	local config = generate(core, group, true)
+	local members
+	if core == xray then
+		members = config.routing.balancers[1].selector
+	else
+		for _, outbound in ipairs(config.outbounds) do
+			if outbound.type == 'urltest' then members = outbound.outbounds end
+		end
+	end
+	assert(members and #members == 2 and members[1] ~= members[2], 'group members with overlapping IDs must stay distinct')
+end
+
 local key = api.base64Encode(string.rep('a', 32))
 for _, core in ipairs({xray, singbox}) do
 	local config = generate(core, {protocol='wireguard', address='2001:db8::1', port='51820',
@@ -60,4 +101,4 @@ for _, core in ipairs({xray, singbox}) do
 	end
 end
 api.uci_get_c = saved_get
-print('PASS generated core configs: WebSocket query preservation, Hysteria2 hopping, IPv6 WireGuard and keepalive')
+print('PASS generated core configs: WebSocket query preservation, Hysteria2 hopping, IPv6 WireGuard, RAW HTTP and XHTTP download DNS')

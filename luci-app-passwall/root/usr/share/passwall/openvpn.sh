@@ -416,7 +416,9 @@ register_acl() {
 
 register_global() {
 	local node="$1" client="$2" localhost="$3" allow_lan="$4" preproxy_port="$5"
-	local dir table dev dns config_status=0
+	local probe_only="$6" slot=0 dir table dev dns config_status=0
+	# Slot zero is global. Slots 1..999 belong to device policies.
+	[ "$probe_only" != probe ] || slot=1000
 	valid_id "$node" || return 1
 	[ "$(config_n_get "$node" type)" = "OpenVPN" ] || return 1
 	[ "$client" = "0" ] || [ "$client" = "1" ] || return 1
@@ -429,10 +431,10 @@ register_global() {
 	if [ ! -d "$dir" ]; then
 		mkdir -p "$dir" || return 1
 		chmod 700 "$OPENVPN_PATH" "$OPENVPN_NODE_PATH" "$dir" 2>/dev/null
-		printf '20000\n' > "$dir/table"
+		echo $((20000 + slot)) > "$dir/table"
 		printf '101\n' > "$dir/priority"
 		printf '100\n' > "$dir/lan_priority"
-		printf 'pswov0\n' > "$dir/dev"
+		echo "pswov$slot" > "$dir/dev"
 		dns=$(config_n_get "$node" vpn_dns 1.1.1.1)
 		valid_ipv4 "$dns" || dns="1.1.1.1"
 		printf '%s\n' "$dns" > "$dir/dns"
@@ -442,7 +444,12 @@ register_global() {
 
 	table=$(cat "$dir/table" 2>/dev/null)
 	dev=$(cat "$dir/dev" 2>/dev/null)
-	[ "$table" = "20000" ] && [ "$dev" = "pswov0" ] || return 1
+	[ "$table" = "$((20000 + slot))" ] && [ "$dev" = "pswov$slot" ] || return 1
+	if [ "$probe_only" = probe ]; then
+		touch "$dir/probe_only" || return 1
+		generate_config "$node" "$preproxy_port" 1
+		return $?
+	fi
 	printf '%s|%s|%s\n' "$client" "$localhost" "$allow_lan" > "$dir/global"
 	collect_global_sources "$dir" "$client"
 	generate_config "$node" "$preproxy_port" 1 || config_status=1

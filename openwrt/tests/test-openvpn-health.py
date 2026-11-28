@@ -44,7 +44,7 @@ try:
         serial = (directory / 'serial.log').open('wb')
         vm = subprocess.Popen(['qemu-system-x86_64', '-machine', 'pc,accel=tcg', '-cpu', 'max',
                                '-smp', '2', '-m', '512', '-drive', f'file={disk},format=raw,if=ide',
-                               '-netdev', f'user,id=wan,net=10.78.0.0/24,dhcpstart=10.78.0.15,hostfwd=udp:127.0.0.1:{vpn_port}-10.78.0.15:1194',
+                               '-netdev', f'user,id=wan,net=10.78.0.0/24,dhcpstart=10.78.0.15,hostfwd=udp:127.0.0.1:{vpn_port}-10.78.0.15:1194,hostfwd=udp:127.0.0.1:{vpn_port+1}-10.78.0.15:1195',
                                '-device', 'e1000,netdev=wan,mac=52:54:00:01:00:20',
                                '-netdev', f'user,id=lan,net=10.0.0.0/24,hostfwd=tcp:127.0.0.1:{server_port}-10.0.0.1:22',
                                '-device', 'e1000,netdev=lan,mac=52:54:00:01:00:10',
@@ -126,6 +126,44 @@ curl --silent --show-error --fail --interface pswov0 --max-time 5 --head https:/
 lua -e 'local d=require("luci.passwall.overview").collect(); assert(d.global.runtime_node.id == "real_vpn"); local found=false; for _,v in ipairs(d.vpns) do if v.id == "real_vpn" then assert(v.status == "tunnel_up" and v.device == "pswov0"); found=true end end; assert(found)'
 ''')
         print('PASS: real OpenVPN TLS handshake, tunnel-bound HTTPS health, automatic guard removal', flush=True)
+        # Both profiles terminate on the disposable VPN server. Drop only the
+        # primary port before redirecting the backup port to the live listener.
+        guest(server_port, '''
+nft add table ip failover
+nft 'add chain ip failover drop_primary { type filter hook prerouting priority -110; }'
+nft add rule ip failover drop_primary udp dport 1194 drop
+nft 'add chain ip failover redirect_backup { type nat hook prerouting priority -101; }'
+nft add rule ip failover redirect_backup udp dport 1195 redirect to :1194
+''')
+        install(client_port, '/tmp/vpn-backup.ovpn', profile.replace(f' {vpn_port}\n', f' {vpn_port+1}\n'))
+        guest(client_port, '''
+uci set passwall.backup_vpn=nodes
+uci set passwall.backup_vpn.type=OpenVPN
+uci set passwall.backup_vpn.config="$(cat /tmp/vpn-backup.ovpn)"
+uci set passwall.@global[0].backup_node=backup_vpn
+uci commit passwall
+/etc/init.d/passwall restart
+test -f /tmp/etc/passwall/openvpn/nodes/backup_vpn/global
+for i in $(seq 1 30); do [ ! -e /tmp/etc/passwall/openvpn/nodes/real_vpn/probe_only ] || break; sleep 1; done
+test -f /tmp/etc/passwall/openvpn/nodes/real_vpn/probe_only
+test ! -s /tmp/etc/passwall/openvpn/nodes/real_vpn/sources
+test ! -e /tmp/passwall_switch_guard
+test "$(uci get passwall.@global[0].node)" = real_vpn
+''')
+        guest(server_port, 'nft flush chain ip failover drop_primary')
+        guest(client_port, '''
+for i in $(seq 1 180); do
+    if [ -f /tmp/etc/passwall/failover_next ]; then echo 0 > /tmp/etc/passwall/failover_next; fi
+    if [ -f /tmp/etc/passwall/openvpn/nodes/real_vpn/global ] && [ ! -e /tmp/passwall_switch_guard ] &&
+        [ "$(cat /tmp/passwall_switch/phase)" = idle ]; then break; fi
+    sleep 1
+done
+test -f /tmp/etc/passwall/openvpn/nodes/real_vpn/global
+test ! -e /tmp/passwall_switch_guard
+uci delete passwall.@global[0].backup_node
+uci commit passwall
+''')
+        print('PASS: unreachable OpenVPN primary at startup, backup takeover and verified automatic return', flush=True)
         guest(client_port, '''
 uci set passwall.device_vpn=nodes
 uci set passwall.device_vpn.type=OpenVPN

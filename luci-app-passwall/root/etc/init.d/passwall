@@ -172,6 +172,15 @@ recover() {
  switch_request_alive && return 0
  set_lock || return 0
  switch_current || { unset_lock; return 0; }
+ # A periodic connectivity sample needs no configuration recovery or writer
+ # lock. Wait for writers only if the samples actually warrant a transition.
+ if [ "$(switch_read phase)" = idle ] && [ "$(switch_read handled)" = "$SWITCH_REQUEST" ] &&
+    switch_failover_due && switch_guard_ready; then
+  switch_failover_tick
+  local status=$?
+  unset_lock
+  return "$status"
+ fi
  switch_cancel_stages
  wait_updates || { switch_failed; unset_lock; return 1; }
  switch_recover

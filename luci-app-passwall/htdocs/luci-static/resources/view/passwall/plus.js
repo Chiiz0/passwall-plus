@@ -99,10 +99,18 @@ function renderDevices(root, data, base) {
 }
 function renderRuntime(root, data, base) {
 	var runtime = data.global.firewall_error ? _('Firewall setup reported an error') : (data.global.start_complete ? _('Last startup completed') : _('No completed startup record'));
+	var exit = _('Runtime exit record') + ': ' + nodeName(data.global.runtime_node);
+	if (data.global.backup_node && data.global.backup_node.id) {
+		exit += ' · ' + _('Backup exit') + ': ' + nodeName(data.global.backup_node);
+		if (data.global.failover_role === 'backup' && data.guard.phase === 'idle' && !data.guard.pending)
+			exit += ' · ' + _('Using backup exit');
+	} else {
+		exit += ' · ' + _('Saved selection and runtime records can differ until changes are applied.');
+	}
 	clear(root.querySelector('#pw-runtime'), [el('div', {class:'pw-panel'}, [
 		el('div', {class:'pw-section-head'}, [el('h3', {}, [_('Global runtime')]), link(base, root.dataset.mode === 'global' ? 'overview' : 'settings', (root.dataset.mode === 'global' ? _('Plus Overview') : _('Global egress')) + ' →')]),
 		el('div', {class:'pw-actions'}, [pill(runtime, data.global.firewall_error ? 'warn' : 'neutral'), pill(data.global.firewall_ready ? _('Firewall readiness recorded') : _('No firewall readiness record'), 'neutral')]),
-		el('p', {class:'pw-muted'}, [_('Runtime exit record') + ': ' + nodeName(data.global.runtime_node) + ' · ' + _('Saved selection and runtime records can differ until changes are applied.')])
+		el('p', {class:'pw-muted'}, [exit])
 	])]);
 }
 function renderDashboard(root, data, base) {

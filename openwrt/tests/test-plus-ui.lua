@@ -47,6 +47,13 @@ assert(status.devices[1].lease and not status.devices[1].lease_matches)
 assert(#status.leases == 2 and status.global.runtime_node.id == 'proxy' and status.global.node.id == 'vpn')
 assert(status.global.node ~= status.nodes[1] and status.devices[1].node ~= status.nodes[1])
 assert(status.devices[1].lease ~= status.leases[1])
+table.insert(sections.nodes, {['.name']='primary', type='Xray'})
+table.insert(sections.acl_rule, {['.name']='inherited', enabled='1', mode='1', use_global_config='1'})
+global.enabled,global.node,global.backup_node='1','primary','proxy'
+files[root .. '/var']="ACL_GLOBAL_node='proxy'\nFAILOVER_ROLE='backup'\n"
+local backup=overview.collect(env)
+assert(backup.global.failover_role=='backup' and backup.global.backup_node.id=='proxy' and backup.global.node.id=='primary')
+assert(backup.devices[1].node.id=='vpn' and backup.devices[4].node.id=='proxy')
 local function scan(t)
  for k,v in pairs(t) do
   assert(k ~= 'password' and k ~= 'config' and k ~= 'username' and k ~= 'address')

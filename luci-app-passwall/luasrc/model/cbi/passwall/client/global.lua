@@ -122,6 +122,26 @@ if node_value then
 end
 current_node = current_node_id and m:get(current_node_id) or {}
 
+local backup = s:taboption("Main", ListValue, "backup_node", translate("Backup exit"),
+	translate("Select a backup to enable automatic switching. Pair two ordinary proxy nodes or two OpenVPN nodes. Three failed HTTPS checks switch to the backup. Three successful primary checks switch back."))
+backup.template = m:template_path("/cbi/nodes_listvalue")
+backup:value("", translate("Disabled"))
+backup.group = {""}
+local exit_types = {}
+for _, v in ipairs(nodes_table) do
+	if v.node_type == "normal" or v.node_type == "openvpn" then
+		backup:value(v.id, v.remark)
+		backup.group[#backup.group + 1] = (v.group and v.group ~= "") and v.group or translate("default")
+		exit_types[v.id] = v.node_type
+	end
+end
+function backup.validate(self, value, section)
+	if value == "" then return value end
+	local primary = s.fields.node:formvalue(section) or m:get(section, "node")
+	if primary ~= value and exit_types[value] and exit_types[primary] == exit_types[value] then return value end
+	return nil, translate("Choose two different proxy nodes or two different OpenVPN nodes.")
+end
+
 -- Shunt Start
 if (has_singbox or has_xray) and #nodes_table > 0 then
 	if #normal_list > 0 or #iface_list > 0 then
@@ -577,15 +597,7 @@ o.default = "proxy"
 o = s:taboption("Proxy", DummyValue, "switch_mode", "")
 o.template = m:template_path("/global/proxy")
 
----- Check the transparent proxy component
-local handle = io.popen("lsmod")
-local mods = ""
-if handle then
-	mods = handle:read("*a") or ""
-	handle:close()
-end
-
-if (mods:find("REDIRECT") and mods:find("TPROXY")) or (mods:find("nft_redir") and mods:find("nft_tproxy")) then
+if api.get_transparent_proxy_support() then
 	o = s:taboption("Proxy", Flag, "localhost_proxy", translate("Localhost Proxy"), translate("When selected, localhost can transparent proxy."))
 	o.default = "1"
 	o.rmempty = false
@@ -614,6 +626,7 @@ o.rmempty = false
 
 o = s:taboption("Proxy", DynamicList, "switch_guard_probe_url", translate("Switch connectivity check URLs"), translate("HTTPS endpoints returning 200 or 204. Checks use each active proxy or VPN; any one endpoint may succeed. Empty uses the node test URL and Gstatic. Choose endpoints reachable through your routing policy."))
 o:depends("switch_guard", "1")
+o:depends({ backup_node = "", ['!reverse'] = true })
 function o.validate(self, value)
 	if value and value:match("^https://[^%s]+$") then return value end
 	return nil, translate("Use an HTTPS URL without spaces.")

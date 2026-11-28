@@ -29,6 +29,7 @@ function M.references(c)
    fields={'preproxy_node','to_node','balancing_node','urltest_node','fallback_node'}
    if s.protocol=='_shunt' then fields[#fields+1]='default_node';fields[#fields+1]='default_proxy_tag'; for _,r in ipairs(rules) do fields[#fields+1]=r end end
   end
+  if s['.type']=='global' then fields[#fields+1]='backup_node' end
   for _,field in ipairs(fields) do for _,id in ipairs(list(s[field])) do
    if c:get('passwall',id)=='nodes' then
     refs[id]=refs[id] or {}; refs[id][#refs[id]+1]={section=s['.name'],field=field,label=s['.name']..'.'..field}

@@ -45,6 +45,9 @@ for _, scheme in ipairs({"naive+https", "naive+quic"}) do
 end
 
 local uuid = "11111111-2222-4333-8444-555555555555"
+check("VLESS RAW HTTP multiple Host and Path values",
+	"vless://" .. uuid .. "@example.net:443?type=raw&headerType=http&host=a.example%2C%20b.example&path=%2Fone%2C%2Ftwo#RAW",
+	{tcp_guise_http_host={"a.example", "b.example"}, tcp_guise_http_path={"/one", "/two"}})
 for _, scheme in ipairs({"vless", "trojan", "hysteria2", "tuic"}) do
 	local auth = scheme == "tuic" and uuid .. ":secret" or (scheme == "vless" and uuid or "secret")
 	check(scheme .. " default TLS port", scheme .. "://" .. auth .. "@[2001:db8::1]/#Node",

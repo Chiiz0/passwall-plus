@@ -5,6 +5,9 @@ local dir='/tmp/ezcnet-catalog-unit';C.fs.mkdir(dir,'700');C.fs.mkdir(dir..'/del
 C.write(dir..'/passwall',[[
 config global 'global'
  option node 'a'
+ option backup_node 'standby'
+config nodes 'standby'
+ option type 'Xray'
 config nodes 'a'
  option type 'Xray'
  option protocol 'vless'
@@ -40,6 +43,7 @@ config acl_rule 'acl'
 ]])
 local function cursor() C.fs.remove(dir..'/delta/passwall');return C.uci.cursor(dir,dir..'/delta') end
 local c=cursor();assert(#M.references(c).a==11)
+assert(#M.references(c).standby==1 and M.references(c).standby[1].field=='backup_node')
 local ok,err=pcall(M.prepare,c,{action='nodes.delete',ids={'a'}},function() end);assert(not ok and err=='node_in_use')
 c=cursor();M.prepare(c,{action='nodes.delete',ids={'a'},replacement='b'},function() end)
 c=cursor();assert(c:get('passwall','global','node')=='b');assert(c:get('passwall','c','preproxy_node')=='b');assert(c:get('passwall','shunt','rule1')=='b');assert(#c:get('passwall','balancer','balancing_node')==1);assert(c:get('passwall','a')==nil)

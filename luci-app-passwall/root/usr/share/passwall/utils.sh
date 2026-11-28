@@ -62,6 +62,22 @@ config_t_get() {
 	printf '%s' "${ret:=${3}}"
 }
 
+# Only pair concrete exits with the same routing semantics (proxy or full VPN).
+global_backup_node() {
+	local primary="$1" backup type node_id vpn=0
+	backup=$(config_n_get '@global[0]' backup_node)
+	[ -n "$backup" ] && [ -n "$primary" ] && [ "$primary" != "$backup" ] || return 1
+	for node_id in "$primary" "$backup"; do
+		case "$node_id" in *[!A-Za-z0-9_+-]*) return 1 ;; esac
+		[ "$(config_get_type "$node_id")" = nodes ] || return 1
+		type=$(config_n_get "$node_id" type)
+		case "$type" in OpenVPN) vpn=$((vpn + 1)) ;; '') return 1 ;; esac
+		case "$(config_n_get "$node_id" protocol)" in _*) return 1 ;; esac
+	done
+	[ "$vpn" != 1 ] || return 1
+	printf '%s\n' "$backup"
+}
+
 eval_set_val() {
 	for i in $@; do
 		for j in $i; do
@@ -527,7 +543,7 @@ ln_run() {
 
 	# Grant upstream access only to the network workers. Configuration generation
 	# and ubus calls retain root's primary group and normal OpenWrt ACL identity.
-	if [ -s /tmp/passwall_switch_guard ]; then
+	if [ -s /tmp/passwall_switch_guard ] || [ "$PROBE_WORKER" = 1 ]; then
 		run_as_direct_gid "$file_func" "$@" >"$output" 2>&1 &
 	else
 		"$file_func" "$@" >"$output" 2>&1 &
@@ -545,6 +561,17 @@ ln_run() {
 		done
 		printf ' >%s 2>&1\n' "$(shell_quote "$output")"
 	} > "$process_file"
+}
+
+# Restart only the failed member of a probe, preserving its siblings (for
+# example the OpenVPN pre-proxy). The record was shell-quoted by ln_run.
+ensure_recorded_process() {
+	local file="$1" pid started cmd
+	{ read -r pid; read -r started; read -r cmd; } < "$file" || return 1
+	[ -n "$started" ] && [ "$(get_process_start_time "$pid")" = "$started" ] && return 0
+	run_as_direct_gid /bin/sh -c "exec $cmd" </dev/null >/dev/null 2>&1 &
+	pid=$!
+	printf '%s\n' "$pid" "$(get_process_start_time "$pid")" "$cmd" > "$file"
 }
 
 kill_all() {

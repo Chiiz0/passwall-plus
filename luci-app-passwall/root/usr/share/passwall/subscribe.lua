@@ -160,36 +160,45 @@ local function flush_log_buffer()
 	end
 end
 
-local nodes_table = {}
-for k, e in ipairs(api.get_valid_nodes()) do
-	if e.node_type == "normal" then
-		nodes_table[#nodes_table + 1] = e
+-- Read the fallback after subscription writes, so its UCI ID is still live.
+local function first_normal_node(excluded)
+	for _, node in ipairs(api.get_valid_nodes()) do
+		if node.node_type == "normal" and node[".name"] ~= excluded then return node end
 	end
 end
 
 -- 获取各项动态配置的当前服务器，可以用 get 和 set， get必须要获取到节点表
 local CONFIG = {}
+local global_refs = {}
 if not library_mode then
-	if true then
+	for _, option in ipairs({"node", "backup_node"}) do
 		local szType = "@global[0]"
-		local option = "node"
 		local node_id = uci_get(szType, option)
-		CONFIG[#CONFIG + 1] = {
-			log = true,
-			remarks = "全局节点",
-			currentNode = (function(id)
-				local section = id and uci_get(id) or nil
-				if not section then return nil end
-				if section[".type"] == "socks" then
-					return { Socks = id }
+		-- An empty standby selection disables failover and must stay empty.
+		if option == "node" or node_id then
+			CONFIG[#CONFIG + 1] = {
+				log = true,
+				remarks = option == "node" and "全局节点" or "全局备用节点",
+				global_option = option,
+				currentNode = (function(id)
+					local section = id and uci_get(id) or nil
+					if not section then return nil end
+					if section[".type"] == "socks" then
+						return { Socks = id }
+					end
+					return section
+				end)(node_id),
+				set = function(o, server)
+					if option == "backup_node" and (not server or server == "") then
+						uci_del(szType, option)
+					else
+						uci_set(szType, option, server)
+					end
+					o.newNodeId = server
 				end
-				return section
-			end)(node_id),
-			set = function(o, server)
-				uci_set(szType, option, server)
-				o.newNodeId = server
-			end
-		}
+			}
+			global_refs[option] = CONFIG[#CONFIG]
+		end
 	end
 
 	if true then
@@ -206,9 +215,8 @@ if not library_mode then
 				currentNode = node_id and uci_get(node_id) or nil,
 				set = function(o, server)
 					if not server or server == "" then
-						if #nodes_table > 0 then
-							server = nodes_table[1][".name"]
-						end
+						local fallback = first_normal_node()
+						server = fallback and fallback[".name"] or ""
 					end
 					uci_set(t[".name"], option, server)
 					o.newNodeId = server
@@ -253,17 +261,21 @@ if not library_mode then
 	if true then
 		local i = 0
 		local option = "lbss"
+		local used_by_port = {}
 		local function is_ip_port(str)
 			if type(str) ~= "string" then return false end
 			local ip, port = str:match("^([%d%.]+):(%d+)$")
 			return ip and datatypes.ipaddr(ip) and tonumber(port) and tonumber(port) <= 65535
 		end
 		uci_foreach("haproxy_config", function(t)
+			local port = t.haproxy_port or ""
+			used_by_port[port] = used_by_port[port] or {}
 			i = i + 1
 			local node_id = t[option]
 			CONFIG[#CONFIG + 1] = {
 				log = true,
 				id = t[".name"],
+				usedNodes = used_by_port[port],
 				remarks = "HAProxy负载均衡节点列表[" .. i .. "]",
 				currentNode = node_id and uci_get(node_id) or nil,
 				set = function(o, server)
@@ -486,11 +498,12 @@ if not library_mode then
 		end
 	end)
 
-	for k, v in pairs(CONFIG) do
+	for k = #CONFIG, 1, -1 do
+		local v = CONFIG[k]
 		if v.currentNodes and type(v.currentNodes) == "table" then
-			for kk, vv in pairs(v.currentNodes) do
-				if vv.currentNode == nil then
-					CONFIG[k].currentNodes[kk] = nil
+			for kk = #v.currentNodes, 1, -1 do
+				if v.currentNodes[kk].currentNode == nil then
+					table.remove(v.currentNodes, kk)
 				end
 			end
 		else
@@ -498,7 +511,7 @@ if not library_mode then
 				if v.delete then
 					v.delete()
 				end
-				CONFIG[k] = nil
+				table.remove(CONFIG, k)
 			end
 		end
 	end
@@ -566,6 +579,19 @@ local function parse_host_port(host_port, default_port)
 		address, port = authority:match("^([^:]+):(.*)$")
 	end
 	return address or authority, (port and port ~= "") and port or default_port
+end
+
+local function parse_raw_http_list(value)
+	if not value or value == "" then return nil end
+	-- v2rayN shares RAW HTTP Host and Path lists as comma-separated strings.
+	local items = type(value) == "string" and split(value, ",") or value
+	if type(items) ~= "table" then return nil end
+	local values = {}
+	for _, item in ipairs(items) do
+		item = api.trim(item)
+		if item ~= "" then values[#values + 1] = item end
+	end
+	return #values > 0 and values or nil
 end
 
 -- 处理数据
@@ -750,8 +776,10 @@ local function processData(szType, content, add_mode, group, sub_cfg)
 				info.type = "none"
 			end
 			result.tcp_guise = info.type
-			result.tcp_guise_http_host = (info.host and info.host ~= "") and { info.host } or nil
-			result.tcp_guise_http_path = (info.path and info.path ~= "") and { info.path } or nil
+			if result.tcp_guise == "http" then
+				result.tcp_guise_http_host = parse_raw_http_list(info.host)
+				result.tcp_guise_http_path = parse_raw_http_list(info.path)
+			end
 		end
 		if info.net == 'kcp' or info.net == 'mkcp' then
 			info.net = "mkcp"
@@ -983,8 +1011,10 @@ local function processData(szType, content, add_mode, group, sub_cfg)
 					end
 					if params.type == 'raw' or params.type == 'tcp' then
 						result.tcp_guise = params.headerType or "none"
-						result.tcp_guise_http_host = (params.host and params.host ~= "") and { params.host } or nil
-						result.tcp_guise_http_path = (params.path and params.path ~= "") and { params.path } or nil
+						if result.tcp_guise == "http" then
+							result.tcp_guise_http_host = parse_raw_http_list(params.host)
+							result.tcp_guise_http_path = parse_raw_http_list(params.path)
+						end
 					end
 					if params.type == 'kcp' or params.type == 'mkcp' then
 						result.transport = "mkcp"
@@ -1183,8 +1213,10 @@ local function processData(szType, content, add_mode, group, sub_cfg)
 			end
 			if params.type == 'raw' or params.type == 'tcp' then
 				result.tcp_guise = params.headerType or "none"
-				result.tcp_guise_http_host = (params.host and params.host ~= "") and { params.host } or nil
-				result.tcp_guise_http_path = (params.path and params.path ~= "") and { params.path } or nil
+				if result.tcp_guise == "http" then
+					result.tcp_guise_http_host = parse_raw_http_list(params.host)
+					result.tcp_guise_http_path = parse_raw_http_list(params.path)
+				end
 			end
 			if params.type == 'kcp' or params.type == 'mkcp' then
 				result.transport = "mkcp"
@@ -1298,8 +1330,10 @@ local function processData(szType, content, add_mode, group, sub_cfg)
 			end
 			if params.type == 'raw' or params.type == 'tcp' then
 				result.tcp_guise = params.headerType or "none"
-				result.tcp_guise_http_host = (params.host and params.host ~= "") and { params.host } or nil
-				result.tcp_guise_http_path = (params.path and params.path ~= "") and { params.path } or nil
+				if result.tcp_guise == "http" then
+					result.tcp_guise_http_host = parse_raw_http_list(params.host)
+					result.tcp_guise_http_path = parse_raw_http_list(params.path)
+				end
 			end
 			if params.type == 'kcp' or params.type == 'mkcp' then
 				result.transport = "mkcp"
@@ -1848,7 +1882,7 @@ local function curl(url, file, ua, mode)
 end
 
 local function truncate_nodes(group)
-	for _, config in pairs(CONFIG) do
+	for _, config in ipairs(CONFIG) do
 		if config.currentNodes and #config.currentNodes > 0 then
 			local newNodes = {}
 			local removeNodesSet = {}
@@ -1894,127 +1928,90 @@ local function truncate_nodes(group)
 	uci_save(true)
 end
 
-local function select_node(nodes, config, parentConfig)
-	if config.currentNode then
-		local server
-		-- 全局节点、acl节点、负载均衡、urltest中的 (Socks [端口]) 节点保持原id
-		if config.currentNode["Socks"] then
-			server = config.currentNode.Socks
+-- Smaller ranks indicate a stronger match. Keep subscription order for ties.
+local function match_rank(old, node)
+	if node[".name"] == old[".name"] then return 0 end
+	if node.group ~= old.group then return end
+	if old.address and node.address == old.address then
+		if old.port and tostring(node.port) == tostring(old.port) then
+			if old.type and node.type == old.type then
+				if old.remarks and node.remarks == old.remarks then return 1 end
+				return 2
+			end
+			return 3
 		end
-		-- 特别优先级 cfgid
-		if config.currentNode[".name"] then
-			for index, node in pairs(nodes) do
-				if node[".name"] == config.currentNode[".name"] then
-					if config.log == nil or config.log == true then
-						log('更新【' .. config.remarks .. '】匹配节点：' .. node.remarks)
-					end
-					server = node[".name"]
-					break
-				end
+		return 4
+	end
+	if old.remarks and node.remarks == old.remarks then return 5 end
+end
+
+local function best_match(nodes, old, used, excluded)
+	if not old then return end
+	if old.Socks then
+		if old.Socks ~= excluded then return old.Socks, 0 end
+		return
+	end
+	local best, rank
+	for _, node in ipairs(nodes) do
+		local id = node[".name"]
+		if id ~= excluded and (not used or not used[id] or used[id] == old[".name"]) then
+			local score = match_rank(old, node)
+			if score and (not rank or score < rank) then
+				best, rank = id, score
+				if rank == 0 then break end
 			end
 		end
-		-- 第一优先级 类型 + 备注 + IP + 端口 + 分组
-		if not server then
-			for index, node in pairs(nodes) do
-				if config.currentNode.type and config.currentNode.remarks and config.currentNode.address and config.currentNode.port then
-					if node.type and node.remarks and node.address and node.port then
-						if node.type == config.currentNode.type and node.remarks == config.currentNode.remarks and (node.address .. ':' .. node.port == config.currentNode.address .. ':' .. config.currentNode.port) and node.group == config.currentNode.group then
-							if config.log == nil or config.log == true then
-								log('更新【' .. config.remarks .. '】第一匹配节点：' .. node.remarks)
-							end
-							server = node[".name"]
-							break
-						end
-					end
-				end
+	end
+	return best, rank
+end
+
+local function remap_global(nodes)
+	local primary, backup = global_refs.node, global_refs.backup_node
+	local main, rank = best_match(nodes, primary.currentNode)
+	local standby, standby_rank = best_match(nodes, backup and backup.currentNode)
+	-- Preserve a stronger standby match if the primary has another candidate.
+	if main and main == standby then
+		local alternate = standby_rank < rank and best_match(nodes, primary.currentNode, nil, standby)
+		if alternate then
+			main = alternate
+		else
+			standby = best_match(nodes, backup.currentNode, nil, main)
+		end
+	end
+	if not main and primary.currentNode then
+		local fallback = first_normal_node(standby)
+		main = fallback and fallback[".name"] or standby
+		if main == standby then standby = nil end
+	end
+	local function apply(ref, id)
+		if ref then
+			if id ~= (ref.currentNode and (ref.currentNode[".name"] or ref.currentNode.Socks)) then
+				log('更新【' .. ref.remarks .. '】：' .. (id and (uci_get(id, "remarks") or id) or "无可用节点"))
 			end
+			ref.set(ref, id or "")
 		end
-		-- 第二优先级 类型 + IP + 端口 + 分组
-		if not server then
-			for index, node in pairs(nodes) do
-				if config.currentNode.type and config.currentNode.address and config.currentNode.port then
-					if node.type and node.address and node.port then
-						if node.type == config.currentNode.type and (node.address .. ':' .. node.port == config.currentNode.address .. ':' .. config.currentNode.port) and node.group == config.currentNode.group then
-							if config.log == nil or config.log == true then
-								log('更新【' .. config.remarks .. '】第二匹配节点：' .. node.remarks)
-							end
-							server = node[".name"]
-							break
-						end
-					end
-				end
-			end
-		end
-		-- 第三优先级 IP + 端口 + 分组
-		if not server then
-			for index, node in pairs(nodes) do
-				if config.currentNode.address and config.currentNode.port then
-					if node.address and node.port then
-						if node.address .. ':' .. node.port == config.currentNode.address .. ':' .. config.currentNode.port and node.group == config.currentNode.group then
-							if config.log == nil or config.log == true then
-								log('更新【' .. config.remarks .. '】第三匹配节点：' .. node.remarks)
-							end
-							server = node[".name"]
-							break
-						end
-					end
-				end
-			end
-		end
-		-- 第四优先级 IP + 分组
-		if not server then
-			for index, node in pairs(nodes) do
-				if config.currentNode.address then
-					if node.address then
-						if node.address == config.currentNode.address and node.group == config.currentNode.group then
-							if config.log == nil or config.log == true then
-								log('更新【' .. config.remarks .. '】第四匹配节点：' .. node.remarks)
-							end
-							server = node[".name"]
-							break
-						end
-					end
-				end
-			end
-		end
-		-- 第五优先级备注 + 分组
-		if not server then
-			for index, node in pairs(nodes) do
-				if config.currentNode.remarks then
-					if node.remarks then
-						if node.remarks == config.currentNode.remarks and node.group == config.currentNode.group then
-							if config.log == nil or config.log == true then
-								log('更新【' .. config.remarks .. '】第五匹配节点：' .. node.remarks)
-							end
-							server = node[".name"]
-							break
-						end
-					end
-				end
-			end
-		end
-		if not parentConfig then
-			-- 还不行 随便找一个
-			if not server then
-				if #nodes_table > 0 then
-					if config.log == nil or config.log == true then
-						log('【' .. config.remarks .. '】' .. '无法找到最匹配的节点，当前已更换为：' .. nodes_table[1].remarks)
-					end
-					server = nodes_table[1][".name"]
-				end
-			end
-		end
-		if server then
-			if parentConfig then
-				config.set(parentConfig, server)
-			else
-				config.set(config, server)
-			end
-		end
-	else
-		if not parentConfig then
-			config.set(config, "")
-		end
+	end
+	if primary.currentNode then apply(primary, main) end
+	apply(backup, standby)
+end
+
+local function select_node(nodes, config, parent)
+	if parent and not parent.usedNodes then parent.usedNodes = {} end
+	local used = parent and parent.usedNodes or config.usedNodes
+	local old = config.currentNode
+	local server = best_match(nodes, old, used)
+	if not server and old and not used then
+		local fallback = first_normal_node()
+		server = fallback and fallback[".name"]
+	end
+	if server then
+		if used then used[server] = old[".name"] or old.Socks end
+		if config.log ~= false then log('更新【' .. config.remarks .. '】匹配节点：' .. (uci_get(server, "remarks") or server)) end
+		config.set(parent or config, server)
+	elseif used and config.delete then
+		config.delete(config)
+	elseif not parent then
+		config.set(config, "")
 	end
 end
 
@@ -2130,22 +2127,23 @@ local function update_node(manual)
 			end
 		end
 	end
-	if next(CONFIG) then
+	if next(CONFIG) or global_refs.backup_node then
 		local nodes = {}
 		uci_foreach("nodes", function(node)
 			nodes[#nodes + 1] = node
 		end)
 
-		for _, config in pairs(CONFIG) do
+		remap_global(nodes)
+		for _, config in ipairs(CONFIG) do
 			if config.currentNodes and #config.currentNodes > 0 then
 				if config.remarks and config.currentNodes[1].log ~= false then
 					log('----【' .. config.remarks .. '】----')
 				end
-				for kk, vv in pairs(config.currentNodes) do
+				for _, vv in ipairs(config.currentNodes) do
 					select_node(nodes, vv, config)
 				end
 				config.set(config)
-			else
+			elseif not config.global_option then
 				select_node(nodes, config)
 			end
 		end
